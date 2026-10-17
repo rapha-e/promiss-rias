@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { dt, mensagemCobranca, money, normalizarTelefones } from "./lib";
 import type { Row } from "./lib";
-import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog } from "./Dialogs";
+import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog } from "./Dialogs";
 
 type Cli = {
   cliente: string; telefone: string; qtd: number; divida: number; pago: number; saldo: number;
@@ -13,6 +13,7 @@ const PS = 30;
 function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; onClose: () => void; onChanged: () => void }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState("");
+  const [baixa, setBaixa] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
@@ -52,6 +53,11 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
                   <td className="n"><b>{money(r.saldo_devedor)}</b></td>
                   <td><StatusPill r={r} />{r.fundo_perdido && <div className="sub">{r.fundo_perdido_motivo}{r.fundo_perdido_em ? ` · ${dt(r.fundo_perdido_em.slice(0, 10))}` : ""}</div>}</td>
                   <td className="acts">
+                    {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
+                      <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
+                        Baixar
+                      </button>
+                    )}
                     {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
                     {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
                   </td>
@@ -61,6 +67,7 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
           </table>
         </div>
       </div>
+      {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={mensagemCobranca(c.cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}

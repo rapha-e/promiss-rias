@@ -46,6 +46,8 @@ td:first-child{box-shadow:inset 4px 0 0 var(--c,transparent);font-weight:600}
 .link-cli{background:none;border:0;padding:0;margin:0;font:inherit;font-weight:600;color:inherit;cursor:pointer;text-align:left;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px;transition:all .15s ease}
 .link-cli:hover{color:var(--brand);text-decoration-color:var(--brand)}
 .ed{background:none;border:1px solid var(--line);border-radius:8px;padding:5px 10px;cursor:pointer}
+.btn-baixa{background:#15803d;color:#fff;border:none;border-radius:8px;padding:5px 12px;font-weight:600;font-size:13px;cursor:pointer;transition:all .15s ease}
+.btn-baixa:hover{background:#166534;filter:brightness(1.1)}
 .pager{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin:12px 0;color:var(--mut)}
 dialog{border:0;padding:0;margin:0 0 0 auto;height:100%;max-height:100%;width:min(440px,100%);background:var(--card);color:var(--ink);box-shadow:-10px 0 40px #0004}
 dialog::backdrop{background:#0006}

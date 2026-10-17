@@ -333,6 +333,7 @@ export function FichaCliente({
 }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState("");
+  const [baixa, setBaixa] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
@@ -397,6 +398,11 @@ export function FichaCliente({
                   <td className="n"><b>{money(r.saldo_devedor)}</b></td>
                   <td><StatusPill r={r} />{r.fundo_perdido && <div className="sub">{r.fundo_perdido_motivo}{r.fundo_perdido_em ? ` · ${dt(r.fundo_perdido_em.slice(0, 10))}` : ""}</div>}</td>
                   <td className="acts">
+                    {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
+                      <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
+                        Baixar
+                      </button>
+                    )}
                     {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
                     {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
                   </td>
@@ -407,9 +413,396 @@ export function FichaCliente({
           </table>
         </div>
       </div>
+      {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}
+    </Painel>
+  );
+}
+
+/**
+ * Modal para dar baixa em uma promissória com possibilidade de informar valor diferente
+ * do calculado e recalcular automaticamente as promissórias restantes dividindo o saldo em aberto.
+ */
+export function BaixaDialog({
+  row,
+  onClose,
+  onSaved,
+}: {
+  row: Row;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [valorStr, setValorStr] = useState(toBRL(row.saldo_devedor));
+  const [outras, setOutras] = useState<Row[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [selecionadas, setSelecionadas] = useState<Set<number>>(new Set());
+  const [recalcular, setRecalcular] = useState(true);
+  const [opcaoSemRestantes, setOpcaoSemRestantes] = useState<"abater" | "quitar">("abater");
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Carregar outras promissórias em aberto do cliente
+  useEffect(() => {
+    let active = true;
+    async function carregar() {
+      setLoading(true);
+      const { data, error } = await supabase
+        .from("promissorias")
+        .select("*")
+        .eq("cliente_nome", row.cliente_nome)
+        .eq("fundo_perdido", false)
+        .gt("saldo_devedor", 0)
+        .neq("id", row.id)
+        .order("vencimento", { ascending: true })
+        .order("id", { ascending: true });
+
+      if (!active) return;
+      setLoading(false);
+      if (error) {
+        setErr("Não foi possível carregar as outras promissórias: " + error.message);
+        return;
+      }
+
+      const lista = (data || []) as Row[];
+      setOutras(lista);
+
+      // Prioriza selecionar promissórias do mesmo carnê (ex: "/3") com vencimento igual ou posterior
+      const m = row.parcelas?.match(/(\d+)\/(\d+)/);
+      if (m) {
+        const totalCarnê = m[2];
+        const doMesmoCarnê = lista.filter(r => r.parcelas?.includes(`/${totalCarnê}`));
+        if (doMesmoCarnê.length > 0) {
+          setSelecionadas(new Set(doMesmoCarnê.map(r => r.id)));
+          return;
+        }
+      }
+      // Se não identificar formato X/Y específico, seleciona todas as outras em aberto
+      setSelecionadas(new Set(lista.map(r => r.id)));
+    }
+
+    carregar();
+    return () => { active = false; };
+  }, [row]);
+
+  const V = parse(valorStr);
+  const ok = !isNaN(V) && V >= 0;
+
+  const parcelasRateio = useMemo(
+    () => outras.filter(r => selecionadas.has(r.id)),
+    [outras, selecionadas]
+  );
+
+  const temRateio = recalcular && parcelasRateio.length > 0;
+
+  // Saldo devedor total somando a promissória atual + as promissórias selecionadas
+  const saldoTotalGrupo = useMemo(() => {
+    return row.saldo_devedor + (temRateio ? parcelasRateio.reduce((acc, r) => acc + r.saldo_devedor, 0) : 0);
+  }, [row.saldo_devedor, temRateio, parcelasRateio]);
+
+  // Saldo que restará para dividir após o pagamento atual
+  const saldoRestante = Math.max(0, saldoTotalGrupo - (ok ? V : 0));
+
+  // Simulação do novo valor para cada promissória restante
+  const simulacao = useMemo(() => {
+    if (!temRateio || !ok || parcelasRateio.length === 0) return [];
+    const k = parcelasRateio.length;
+    const base = Math.floor(saldoRestante / k);
+    const resto = saldoRestante % k;
+
+    return parcelasRateio.map((item, idx) => {
+      const novoSaldo = base + (idx === 0 ? resto : 0);
+      return {
+        ...item,
+        saldoAnterior: item.saldo_devedor,
+        novoSaldo,
+        diferenca: novoSaldo - item.saldo_devedor,
+      };
+    });
+  }, [temRateio, ok, parcelasRateio, saldoRestante]);
+
+  function toggleSelecionada(id: number) {
+    setSelecionadas(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  async function submit(e: FormEvent) {
+    e.preventDefault();
+    if (!ok) return setErr("Informe um valor monetário válido.");
+    if (V <= 0) return setErr("O valor pago deve ser maior que zero.");
+    if (V > saldoTotalGrupo) {
+      return setErr(`O valor informado (${money(V)}) não pode ser maior que o saldo total (${money(saldoTotalGrupo)}).`);
+    }
+
+    setBusy(true);
+    setErr("");
+
+    try {
+      if (temRateio) {
+        // 1. Quitar a promissória atual com o valor recebido nesta baixa
+        const novaDividaAtual = row.valor_pago + V;
+        const { error: errAtual } = await supabase
+          .from("promissorias")
+          .update({
+            divida_total: novaDividaAtual,
+            valor_pago: novaDividaAtual,
+          })
+          .eq("id", row.id);
+
+        if (errAtual) throw new Error("Erro ao baixar promissória: " + errAtual.message);
+
+        // 2. Atualizar cada uma das promissórias restantes com o novo valor recalculado
+        for (const item of simulacao) {
+          const novaDivida = item.valor_pago + item.novoSaldo;
+          const { error: errFilha } = await supabase
+            .from("promissorias")
+            .update({
+              divida_total: novaDivida,
+            })
+            .eq("id", item.id);
+
+          if (errFilha) throw new Error(`Erro ao atualizar parcela ${item.parcelas}: ` + errFilha.message);
+        }
+      } else {
+        // Baixa individual sem rateio
+        if (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar") {
+          // Quitação total com desconto
+          const novaDivida = row.valor_pago + V;
+          const { error } = await supabase
+            .from("promissorias")
+            .update({
+              divida_total: novaDivida,
+              valor_pago: novaDivida,
+            })
+            .eq("id", row.id);
+          if (error) throw new Error(error.message);
+        } else {
+          // Abate de valor
+          const novoPago = row.valor_pago + V;
+          const { error } = await supabase
+            .from("promissorias")
+            .update({
+              valor_pago: novoPago,
+            })
+            .eq("id", row.id);
+          if (error) throw new Error(error.message);
+        }
+      }
+
+      setBusy(false);
+      onSaved();
+    } catch (e: any) {
+      setBusy(false);
+      setErr(e.message || "Erro ao registrar baixa.");
+    }
+  }
+
+  const isDiferente = ok && V !== row.saldo_devedor;
+
+  return (
+    <Painel onClose={onClose} wide={temRateio}>
+      <form onSubmit={submit} autoComplete="off">
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h2 style={{ margin: 0, color: "var(--ink)" }}>Dar Baixa / Pagamento</h2>
+          <span className="pill" style={{ background: "#15803d15", color: "#15803d", borderColor: "#15803d" }}>
+            Operação de Caixa
+          </span>
+        </div>
+
+        <div style={{ background: "var(--soft)", padding: "12px 14px", borderRadius: 10, border: "1px solid var(--line)" }}>
+          <div style={{ fontSize: 16, fontWeight: 700 }}>{row.cliente_nome}</div>
+          <div className="sub mono" style={{ marginTop: 2 }}>{row.telefone || "Sem telefone"}</div>
+          <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 13, flexWrap: "wrap" }}>
+            <span>Parcela: <b>{row.parcelas || "1X"}</b></span>
+            <span>Vencimento: <b>{dt(row.vencimento)}</b></span>
+            <span>Saldo original da parcela: <b className="mono">{money(row.saldo_devedor)}</b></span>
+          </div>
+        </div>
+
+        <label style={{ marginTop: 4 }}>
+          <span style={{ fontWeight: 700, color: "var(--ink)", fontSize: 14 }}>
+            Valor recebido nesta baixa (R$)
+          </span>
+          <input
+            value={valorStr}
+            onChange={e => setValorStr(e.target.value)}
+            inputMode="decimal"
+            placeholder="0,00"
+            style={{ fontSize: 18, fontWeight: 600, padding: "10px 12px" }}
+            autoFocus
+            required
+          />
+          <span className="sub">
+            {isDiferente
+              ? V > row.saldo_devedor
+                ? `Valor recebido é R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} MAIOR que o valor calculado da parcela.`
+                : `Valor recebido é R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} MENOR que o valor calculado da parcela.`
+              : "Valor exato do vencimento calculado."}
+          </span>
+        </label>
+
+        {loading ? (
+          <div className="sub" style={{ padding: 10 }}>Buscando outras promissórias do cliente…</div>
+        ) : outras.length > 0 ? (
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid", gap: 10 }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
+              <input
+                type="checkbox"
+                checked={recalcular}
+                onChange={e => setRecalcular(e.target.checked)}
+                style={{ width: 18, height: 18, accentColor: "#15803d" }}
+              />
+              Recalcular e ratear o saldo restante nas demais promissórias ({outras.length} em aberto)
+            </label>
+
+            {recalcular && (
+              <>
+                <div className="sub">
+                  Selecione quais promissórias futuras devem absorver a diferença do saldo:
+                </div>
+                <div
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 10,
+                    overflow: "hidden",
+                    maxHeight: 240,
+                    overflowY: "auto",
+                  }}
+                >
+                  <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ background: "var(--soft)", color: "var(--mut)", fontSize: 11 }}>
+                        <th style={{ width: 34, padding: "6px 8px" }} />
+                        <th style={{ textAlign: "left", padding: "6px 8px" }}>PARCELA</th>
+                        <th style={{ textAlign: "left", padding: "6px 8px" }}>VENCIMENTO</th>
+                        <th style={{ textAlign: "right", padding: "6px 8px" }}>SALDO ATUAL</th>
+                        <th style={{ textAlign: "right", padding: "6px 8px" }}>NOVO VALOR</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {outras.map(r => {
+                        const sel = selecionadas.has(r.id);
+                        const itemSim = simulacao.find(s => s.id === r.id);
+                        return (
+                          <tr
+                            key={r.id}
+                            style={{
+                              borderTop: "1px solid var(--line)",
+                              background: sel ? "transparent" : "var(--soft)",
+                              opacity: sel ? 1 : 0.6,
+                            }}
+                          >
+                            <td style={{ padding: "6px 8px", textAlign: "center" }}>
+                              <input
+                                type="checkbox"
+                                checked={sel}
+                                onChange={() => toggleSelecionada(r.id)}
+                                style={{ accentColor: "#15803d" }}
+                              />
+                            </td>
+                            <td style={{ padding: "6px 8px", fontWeight: 600 }}>{r.parcelas || "—"}</td>
+                            <td style={{ padding: "6px 8px" }}>{dt(r.vencimento)}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">{money(r.saldo_devedor)}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">
+                              {sel && itemSim ? (
+                                <b style={{ color: itemSim.diferenca !== 0 ? (itemSim.diferenca > 0 ? "var(--bad)" : "var(--brand)") : "inherit" }}>
+                                  {money(itemSim.novoSaldo)}
+                                </b>
+                              ) : "—"}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {/* Resumo do recálculo */}
+                {parcelasRateio.length > 0 && ok && (
+                  <div
+                    style={{
+                      background: "var(--soft)",
+                      borderRadius: 10,
+                      padding: "10px 14px",
+                      display: "grid",
+                      gridTemplateColumns: "1fr 1fr",
+                      gap: 8,
+                      fontSize: 13,
+                    }}
+                  >
+                    <div>
+                      <span className="sub">Dívida total antes:</span>
+                      <div className="mono" style={{ fontWeight: 600 }}>{money(saldoTotalGrupo)}</div>
+                    </div>
+                    <div>
+                      <span className="sub">Valor pago agora:</span>
+                      <div className="mono" style={{ fontWeight: 600, color: "#15803d" }}>- {money(V)}</div>
+                    </div>
+                    <div>
+                      <span className="sub">Saldo restante:</span>
+                      <div className="mono" style={{ fontWeight: 700 }}>{money(saldoRestante)}</div>
+                    </div>
+                    <div>
+                      <span className="sub">Novo valor por parcela ({parcelasRateio.length}x):</span>
+                      <div className="mono" style={{ fontWeight: 700, color: "var(--brand)" }}>
+                        ~ {money(simulacao[0]?.novoSaldo || 0)}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          /* Sem outras promissórias abertas */
+          ok && V < row.saldo_devedor && (
+            <div style={{ background: "var(--soft)", padding: 12, borderRadius: 10, border: "1px solid var(--line)" }}>
+              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
+                O valor pago é menor que o saldo devedor ({money(row.saldo_devedor)}). Como deseja registrar?
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                <input
+                  type="radio"
+                  name="opcaoSemRestantes"
+                  checked={opcaoSemRestantes === "abater"}
+                  onChange={() => setOpcaoSemRestantes("abater")}
+                />
+                Abater pagamento (continua em aberto com saldo de {money(row.saldo_devedor - V)})
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 4 }}>
+                <input
+                  type="radio"
+                  name="opcaoSemRestantes"
+                  checked={opcaoSemRestantes === "quitar"}
+                  onChange={() => setOpcaoSemRestantes("quitar")}
+                />
+                Quitar promissória (conceder desconto e finalizar)
+              </label>
+            </div>
+          )
+        )}
+
+        <div className="err">{err}</div>
+
+        <div className="r2">
+          <button type="button" className="btn ghost" onClick={onClose} disabled={busy}>
+            Cancelar
+          </button>
+          <button
+            className="btn"
+            style={{ background: "#15803d", borderColor: "#15803d", color: "#fff" }}
+            disabled={busy || !ok || V <= 0}
+          >
+            {busy ? "Gravando…" : temRateio ? "Confirmar Baixa e Recalcular" : "Confirmar Baixa"}
+          </button>
+        </div>
+      </form>
     </Painel>
   );
 }
