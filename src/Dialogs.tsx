@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, formatarTelefone,
-  getDDD, linkWhatsApp, mascaraTelefone, mensagemCobranca, money, normalizarTelefones, parse, setDDD, toBRL
+  getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, money, normalizarTelefones, parse, setDDD, somaDias, toBRL
 } from "./lib";
 import type { Row } from "./lib";
 
@@ -35,47 +35,204 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [p, setP] = useState(row ? mascaraTelefone(row.telefone) : "");
   const [t, setT] = useState(row ? toBRL(row.divida_total) : "");
   const [g, setG] = useState(row ? toBRL(row.valor_pago) : "");
-  const [i, setI] = useState(row?.parcelas ?? "");
-  const [d, setD] = useState(row?.vencimento ?? "");
+  const [qtd, setQtd] = useState(1);
+  const [i, setI] = useState(row?.parcelas ?? "1X");
+  const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
-  const T = parse(t), G = parse(g), ok = !isNaN(T) && !isNaN(G);
+
+  const T = parse(t);
+  const G = parse(g);
+  const ok = !isNaN(T) && !isNaN(G);
+  const isNova = !row;
+
+  // Cálculo e divisão das promissórias (a cada 30 dias após o 1º vencimento)
+  const parcelasCalculadas = useMemo(() => {
+    if (!isNova || !ok || T <= 0 || qtd <= 0) return [];
+    const base = Math.floor(T / qtd);
+    const resto = T % qtd;
+    let restantePago = G;
+
+    return Array.from({ length: qtd }, (_, idx) => {
+      const num = idx + 1;
+      const valor = base + (idx === 0 ? resto : 0);
+      const pago = Math.min(restantePago, valor);
+      restantePago = Math.max(0, restantePago - pago);
+      const vencimento = d ? somaDias(d, idx * 30) : null;
+      const rotulo = qtd === 1 ? "1X" : `${num}/${qtd}`;
+
+      return {
+        numero: num,
+        parcela: rotulo,
+        valor,
+        pago,
+        saldo: Math.max(0, valor - pago),
+        vencimento,
+      };
+    });
+  }, [isNova, ok, T, qtd, G, d]);
+
   const st = ok ? derive(T, G, d) : null;
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (n.trim().length < 2) return setErr("Informe o nome do cliente.");
     if (!ok) return setErr("Valores devem ser monetários e não negativos.");
+    if (!d) return setErr("Informe a data de vencimento.");
+
     setBusy(true);
-    const payload = { cliente_nome: n.trim(), telefone: p.trim(), divida_total: T, parcelas: i.trim(), valor_pago: G, vencimento: d || null };
-    const { error } = row
-      ? await supabase.from("promissorias").update(payload).eq("id", row.id)
-      : await supabase.from("promissorias").insert(payload);
-    setBusy(false);
-    if (error) return setErr("Não foi possível salvar: " + error.message);
+    setErr("");
+
+    if (row) {
+      // Edição de promissória existente
+      const payload = {
+        cliente_nome: n.trim(),
+        telefone: p.trim(),
+        divida_total: T,
+        parcelas: i.trim(),
+        valor_pago: G,
+        vencimento: d || null,
+      };
+      const { error } = await supabase.from("promissorias").update(payload).eq("id", row.id);
+      setBusy(false);
+      if (error) return setErr("Não foi possível salvar: " + error.message);
+    } else {
+      // Criação de novas promissórias com divisão automática
+      const payload = parcelasCalculadas.map(item => ({
+        cliente_nome: n.trim(),
+        telefone: p.trim(),
+        divida_total: item.valor,
+        parcelas: item.parcela,
+        valor_pago: item.pago,
+        vencimento: item.vencimento,
+      }));
+      const { error } = await supabase.from("promissorias").insert(payload);
+      setBusy(false);
+      if (error) return setErr("Não foi possível salvar: " + error.message);
+    }
+
     onSaved();
   }
+
   return (
     <Painel onClose={onClose}>
       <form onSubmit={submit} autoComplete="off">
         <h2 style={{ margin: 0 }}>{row ? "Editar promissória" : "Nova promissória"}</h2>
-        <label>Cliente<input value={n} onChange={e => setN(e.target.value)} maxLength={180} required /></label>
-        <label>Telefone<input value={p} onChange={e => setP(mascaraTelefone(e.target.value))} inputMode="tel" maxLength={40} placeholder="(61) 99999-9999" /></label>
-        <div className="r2">
-          <label>Dívida total (R$)<input value={t} onChange={e => setT(e.target.value)} inputMode="decimal" placeholder="0,00" required /></label>
-          <label>Valor pago (R$)<input value={g} onChange={e => setG(e.target.value)} inputMode="decimal" placeholder="0,00" /></label>
-        </div>
-        <div className="r2">
-          <label>Parcelas<input value={i} onChange={e => setI(e.target.value)} maxLength={40} placeholder="ex.: 6X" /></label>
-          <label>Vencimento<input type="date" value={d} onChange={e => setD(e.target.value)} /></label>
-        </div>
-        <div className="prev">
-          <span>Saldo <b className="mono">{ok ? money(Math.max(T - G, 0)) : "—"}</b></span>
-          {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
-        </div>
+        <label>
+          Cliente
+          <input value={n} onChange={e => setN(e.target.value)} maxLength={180} required placeholder="Nome do cliente" />
+        </label>
+        <label>
+          Telefone
+          <input value={p} onChange={e => setP(mascaraTelefone(e.target.value))} inputMode="tel" maxLength={40} placeholder="(61) 99999-9999" />
+        </label>
+
+        {isNova ? (
+          <>
+            <div className="r2">
+              <label>
+                Valor total da dívida (R$)
+                <input value={t} onChange={e => setT(e.target.value)} inputMode="decimal" placeholder="0,00" required />
+              </label>
+              <label>
+                Número de promissórias
+                <select
+                  value={qtd}
+                  onChange={e => {
+                    const q = Number(e.target.value);
+                    setQtd(q);
+                    setI(q === 1 ? "1X" : `${q}X`);
+                  }}
+                >
+                  {Array.from({ length: 12 }, (_, idx) => idx + 1).map(num => (
+                    <option key={num} value={num}>
+                      {num === 1 ? "1x (Parcela única)" : `${num}x`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            <div className="r2">
+              <label>
+                1º Vencimento
+                <input type="date" value={d} onChange={e => setD(e.target.value)} required />
+              </label>
+              <label>
+                Valor já pago / Entrada (R$)
+                <input value={g} onChange={e => setG(e.target.value)} inputMode="decimal" placeholder="0,00" />
+              </label>
+            </div>
+
+            {/* Pré-visualização de todas as promissórias calculadas */}
+            {parcelasCalculadas.length > 0 && (
+              <div
+                style={{
+                  background: "var(--soft)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  border: "1px solid var(--line)",
+                  marginTop: 4,
+                  maxHeight: 220,
+                  overflowY: "auto",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
+                  <span>PROMISSÓRIAS CALCULADAS ({qtd}x)</span>
+                  <span>A CADA 30 DIAS</span>
+                </div>
+                <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse", minWidth: 0 }}>
+                  <thead>
+                    <tr style={{ color: "var(--mut)", fontSize: 11, borderBottom: "1px solid var(--line)" }}>
+                      <th style={{ textAlign: "left", padding: "4px 0" }}>PARCELA</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>VALOR</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>VENCIMENTO</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parcelasCalculadas.map(item => {
+                      const stItem = derive(item.valor, item.pago, item.vencimento);
+                      return (
+                        <tr key={item.numero} style={{ borderTop: "1px solid var(--line)" }}>
+                          <td style={{ padding: "6px 0", fontWeight: 600 }}>{item.parcela}</td>
+                          <td style={{ padding: "6px 0", textAlign: "right" }} className="mono">{money(item.valor)}</td>
+                          <td style={{ padding: "6px 0", textAlign: "right" }} className="mono">{dt(item.vencimento)}</td>
+                          <td style={{ padding: "6px 0", textAlign: "right" }}>
+                            <span className={`pill p-${cls(stItem)}`} style={{ fontSize: 11, padding: "2px 8px" }}>
+                              {LBL[stItem]}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <div className="r2">
+              <label>Dívida (R$)<input value={t} onChange={e => setT(e.target.value)} inputMode="decimal" placeholder="0,00" required /></label>
+              <label>Valor pago (R$)<input value={g} onChange={e => setG(e.target.value)} inputMode="decimal" placeholder="0,00" /></label>
+            </div>
+            <div className="r2">
+              <label>Parcelas<input value={i} onChange={e => setI(e.target.value)} maxLength={40} placeholder="ex.: 1/3" /></label>
+              <label>Vencimento<input type="date" value={d} onChange={e => setD(e.target.value)} /></label>
+            </div>
+            <div className="prev">
+              <span>Saldo <b className="mono">{ok ? money(Math.max(T - G, 0)) : "—"}</b></span>
+              {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
+            </div>
+          </>
+        )}
+
         <div className="err">{err}</div>
         <div className="r2">
           <button type="button" className="btn ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn" disabled={busy}>{busy ? "Salvando…" : "Salvar"}</button>
+          <button className="btn" disabled={busy}>
+            {busy ? "Salvando…" : isNova && qtd > 1 ? `Salvar (${qtd} promissórias)` : "Salvar"}
+          </button>
         </div>
       </form>
     </Painel>
