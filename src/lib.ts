@@ -1,4 +1,4 @@
-export type Status = "QUITADO" | "PAGANDO" | "NÃO PAGOU" | "FUNDO PERDIDO";
+export type Status = "QUITADO" | "PAGANDO" | "NÃO PAGOU" | "A VENCER" | "FUNDO PERDIDO";
 export type Row = {
   id: number; cliente_nome: string; telefone: string; divida_total: number; parcelas: string;
   valor_pago: number; saldo_devedor: number; vencimento: string | null; ano: number | null; status: Status;
@@ -9,10 +9,48 @@ export type Item = { valor: number; vencimento: string | null };
 const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 export const money = (c: number) => fmt.format(c / 100);
 export const toBRL = (c: number) => (c / 100).toFixed(2).replace(".", ",");
-export const LBL: Record<Status, string> = { QUITADO: "Quitado", PAGANDO: "Pagando", "NÃO PAGOU": "Não pagou", "FUNDO PERDIDO": "Fundo perdido" };
-export const cls = (s: Status) => s.split(" ")[0];
+export const LBL: Record<Status, string> = {
+  QUITADO: "Quitado",
+  PAGANDO: "Pagando",
+  "NÃO PAGOU": "Não pagou",
+  "A VENCER": "A vencer",
+  "FUNDO PERDIDO": "Fundo perdido"
+};
+export const cls = (s: Status) => (s === "A VENCER" ? "VENCER" : s.split(" ")[0]);
 export const dt = (d: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "Sem vencimento");
-export const derive = (t: number, g: number): Status => (Math.max(t - g, 0) === 0 ? "QUITADO" : g === 0 ? "NÃO PAGOU" : "PAGANDO");
+
+export function deriveStatus(r: {
+  status?: string;
+  fundo_perdido?: boolean;
+  divida_total: number;
+  valor_pago: number;
+  saldo_devedor?: number;
+  vencimento?: string | null;
+}): Status {
+  if (r.fundo_perdido) return "FUNDO PERDIDO";
+  const saldo = r.saldo_devedor ?? Math.max(r.divida_total - r.valor_pago, 0);
+  if (saldo <= 0) return "QUITADO";
+  if (r.valor_pago > 0) return "PAGANDO";
+  const h = hoje();
+  if (r.vencimento && r.vencimento < h) return "NÃO PAGOU";
+  return "A VENCER";
+}
+
+export const derive = (t: number, g: number, d?: string | null): Status =>
+  deriveStatus({ divida_total: t, valor_pago: g, vencimento: d });
+
+export function mascaraTelefone(v: string): string {
+  if (!v) return "";
+  if (/[\/;]/.test(v)) {
+    return v.split(/([\/;])/).map(part => (part === "/" || part === ";" ? part : mascaraTelefone(part.trim()))).join(" ");
+  }
+  const d = v.replace(/\D/g, "");
+  if (!d) return "";
+  if (d.length <= 2) return `(${d}`;
+  if (d.length <= 6) return `(${d.slice(0, 2)}) ${d.slice(2)}`;
+  if (d.length <= 10) return `(${d.slice(0, 2)}) ${d.slice(2, 6)}-${d.slice(6, 10)}`;
+  return `(${d.slice(0, 2)}) ${d.slice(2, 7)}-${d.slice(7, 11)}`;
+}
 
 export function parse(v: string) {
   v = v.trim();

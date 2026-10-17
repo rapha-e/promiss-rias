@@ -5,6 +5,7 @@ import { configured, supabase } from "./supabase";
 import Promissorias from "./Promissorias";
 import Clientes from "./Clientes";
 import Relatorio from "./Relatorio";
+import logo from "./logo.png";
 
 function Login() {
   const [email, setEmail] = useState("");
@@ -21,8 +22,11 @@ function Login() {
   return (
     <div className="login">
       <form className="card" onSubmit={go}>
-        <div className="brand">gestão<i>.</i>fin</div>
-        <div className="sub">Promissórias Loja — acesso restrito</div>
+        <div style={{ textAlign: "center", marginBottom: 18 }}>
+          <img src={logo} alt="LeoÓticas" className="login-logo" />
+          <div className="brand">LeoÓticas<i>.</i>fin</div>
+          <div className="sub">Promissórias Loja — acesso restrito</div>
+        </div>
         <label>E-mail<input type="email" required value={email} onChange={e => setEmail(e.target.value)} /></label>
         <label>Senha<input type="password" required value={pw} onChange={e => setPw(e.target.value)} /></label>
         <div className="err">{err}</div>
@@ -46,8 +50,8 @@ function Shell({ session }: { session: Session }) {
   return (
     <>
       <header className="noprint">
-        <div className="gf">GF</div>
-        <div><div className="brand">gestão<i>.</i>fin</div><div className="sub">Promissórias Loja</div></div>
+        <img src={logo} alt="LeoÓticas" className="header-logo" />
+        <div><div className="brand">LeoÓticas<i>.</i>fin</div><div className="sub">Promissórias Loja</div></div>
         <div className="sp" />
         <span className="role">{session.user.email} · {isAdmin ? "administrador" : "leitura"}</span>
         <button className="btn ghost" onClick={() => supabase.auth.signOut()}>Sair</button>

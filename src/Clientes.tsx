@@ -109,7 +109,16 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
           <tbody>
             {list.map(c => (
               <tr key={c.cliente}>
-                <td className={c.vencido > 0 ? "s-NÃO" : c.saldo > 0 ? "s-PAGANDO" : "s-QUITADO"}>{c.cliente}</td>
+                <td className={c.vencido > 0 ? "s-NÃO" : c.saldo > 0 ? "s-PAGANDO" : "s-QUITADO"}>
+                  <button
+                    type="button"
+                    className="link-cli"
+                    title={`Ver todas as promissórias de ${c.cliente}`}
+                    onClick={() => setSel(c)}
+                  >
+                    {c.cliente}
+                  </button>
+                </td>
                 <td className="mono">{c.telefone || "—"}</td>
                 <td className="n">{c.qtd}</td>
                 <td className="n">{money(c.divida)}</td>

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import { baixarCSV, diffDias, dt, hoje, mensagemCobranca, money, normalizarTelefones, somaDias, toBRL } from "./lib";
-import { WhatsDialog } from "./Dialogs";
+import { FichaCliente, WhatsDialog } from "./Dialogs";
 
 type Rel = {
   id: number; cliente_nome: string; telefone: string; parcelas: string; divida_total: number;
@@ -22,6 +22,7 @@ export default function Relatorio() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [whats, setWhats] = useState<Rel | null>(null);
+  const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true); setError("");
@@ -77,7 +78,7 @@ export default function Relatorio() {
           <button className="btn" onClick={() => window.print()} disabled={!rows.length}>Imprimir</button>
         </div>
       </div>
-      <div className="printonly"><h1>gestão.fin — Relatório de vencimentos</h1><div>{periodo} · emitido em {dt(hoje())}</div></div>
+      <div className="printonly"><h1>LeoÓticas.fin — Relatório de vencimentos</h1><div>{periodo} · emitido em {dt(hoje())}</div></div>
       {error && <div className="warn">Erro: {error}</div>}
       <div className="chips noprint">
         <button className="chip" onClick={() => preset("vencidas")}>Vencidas</button>
@@ -112,7 +113,16 @@ export default function Relatorio() {
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
-                <td className={r.dias_atraso > 0 ? "s-NÃO" : "s-PAGANDO"}>{r.cliente_nome}</td>
+                <td className={r.dias_atraso > 0 ? "s-NÃO" : "s-PAGANDO"}>
+                  <button
+                    type="button"
+                    className="link-cli"
+                    title={`Ver todas as promissórias de ${r.cliente_nome}`}
+                    onClick={() => setFichaCliente({ cliente: r.cliente_nome, telefone: r.telefone })}
+                  >
+                    {r.cliente_nome}
+                  </button>
+                </td>
                 <td className="mono">{r.telefone || "—"}</td>
                 <td className="mono">{dt(r.vencimento)}</td>
                 <td><span className={`al ${r.dias_atraso > 0 ? "al-vencida" : "al-proxima"}`}>{situacaoTxt(r)}</span></td>
@@ -127,6 +137,15 @@ export default function Relatorio() {
         </table>
       </div>
       {whats && <WhatsDialog nome={whats.cliente_nome} telefone={whats.telefone} mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])} onClose={() => setWhats(null)} />}
+      {fichaCliente && (
+        <FichaCliente
+          cliente={fichaCliente.cliente}
+          telefone={fichaCliente.telefone}
+          isAdmin={true}
+          onClose={() => setFichaCliente(null)}
+          onChanged={load}
+        />
+      )}
     </>
   );
 }

@@ -1,5 +1,5 @@
 -- ==============================================================================
--- gestão.fin — Promissórias Loja
+-- LeoÓticas.fin — Promissórias Loja
 -- SCRIPT CONSOLIDADO COMPLETO PARA O SUPABASE (PostgreSQL + RLS + Funções)
 -- ==============================================================================
 -- Instruções:
@@ -160,7 +160,8 @@ language sql stable security invoker set search_path = public as $$
     'status', jsonb_build_object(
       'QUITADO', count(*) filter (where status = 'QUITADO'),
       'PAGANDO', count(*) filter (where status = 'PAGANDO'),
-      'NÃO PAGOU', count(*) filter (where status = 'NÃO PAGOU'),
+      'A VENCER', count(*) filter (where not fundo_perdido and valor_pago = 0 and (vencimento >= public.hoje_br() or vencimento is null)),
+      'NÃO PAGOU', count(*) filter (where not fundo_perdido and valor_pago = 0 and vencimento < public.hoje_br()),
       'FUNDO PERDIDO', count(*) filter (where status = 'FUNDO PERDIDO')),
     'vencidas_qtd', count(*) filter (where not fundo_perdido and saldo_devedor > 0 and vencimento < public.hoje_br()),
     'vencidas_valor', coalesce(sum(saldo_devedor) filter (where not fundo_perdido and vencimento < public.hoje_br()), 0),
@@ -168,6 +169,18 @@ language sql stable security invoker set search_path = public as $$
                        and vencimento between public.hoje_br() and public.hoje_br() + 7),
     'proximas_valor', coalesce(sum(saldo_devedor) filter (where not fundo_perdido
                        and vencimento between public.hoje_br() and public.hoje_br() + 7), 0),
+    'd1_qtd', count(*) filter (where not fundo_perdido and saldo_devedor > 0
+               and vencimento between public.hoje_br() and public.hoje_br() + 1),
+    'd1_valor', coalesce(sum(saldo_devedor) filter (where not fundo_perdido
+               and vencimento between public.hoje_br() and public.hoje_br() + 1), 0),
+    'd7_qtd', count(*) filter (where not fundo_perdido and saldo_devedor > 0
+               and vencimento between public.hoje_br() and public.hoje_br() + 7),
+    'd7_valor', coalesce(sum(saldo_devedor) filter (where not fundo_perdido
+               and vencimento between public.hoje_br() and public.hoje_br() + 7), 0),
+    'd30_qtd', count(*) filter (where not fundo_perdido and saldo_devedor > 0
+               and vencimento between public.hoje_br() and public.hoje_br() + 30),
+    'd30_valor', coalesce(sum(saldo_devedor) filter (where not fundo_perdido
+               and vencimento between public.hoje_br() and public.hoje_br() + 30), 0),
     'anos', coalesce((select jsonb_agg(a order by a desc)
                       from (select distinct ano as a from public.promissorias where ano is not null) x), '[]'::jsonb)
   ) from public.promissorias;

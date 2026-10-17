@@ -1,4 +1,4 @@
--- gestão.fin — Promissórias Loja (Supabase / Postgres)
+-- LeoÓticas.fin — Promissórias Loja (Supabase / Postgres)
 -- Execute no SQL Editor do Supabase (ou via supabase db push).
 
 create extension if not exists pg_trgm with schema extensions;

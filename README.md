@@ -1,4 +1,4 @@
-# gestão.fin — Promissórias Loja (Supabase + Vercel)
+# LeoÓticas.fin — Promissórias Loja (Supabase + Vercel)
 
 Vite + React no frontend; Supabase (Postgres, Auth, RLS) no backend; deploy na Vercel.
 Saldo, ano e status são **colunas geradas no banco**: o navegador nunca define esses valores.
