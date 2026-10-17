@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
-  LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, formatarTelefone,
+  LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, money, normalizarTelefones, parse, setDDD, somaDias, toBRL
 } from "./lib";
 import type { Row } from "./lib";
@@ -334,6 +334,7 @@ export function FichaCliente({
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [baixa, setBaixa] = useState<Row | null>(null);
+  const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
@@ -403,6 +404,11 @@ export function FichaCliente({
                         Baixar
                       </button>
                     )}
+                    {r.valor_pago > 0 && (
+                      <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
+                        Ver log
+                      </button>
+                    )}
                     {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
                     {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
                   </td>
@@ -414,6 +420,7 @@ export function FichaCliente({
         </div>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
+      {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}
@@ -543,6 +550,48 @@ export function BaixaDialog({
     setErr("");
 
     try {
+      // Obter dados do operador autenticado para auditoria
+      const { data: userData } = await supabase.auth.getUser();
+      const operadorEmail = userData.user?.email || "operador@leoticas.fin";
+      const operadorId = userData.user?.id || null;
+      const agoraIso = new Date().toISOString();
+
+      const detalhesOp = temRateio
+        ? `Baixa quitada com recálculo e rateio de ${money(saldoRestante)} em ${parcelasRateio.length} parcela(s) restante(s).`
+        : (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar"
+          ? `Quitação com desconto concedido (pago ${money(V)} de saldo ${money(row.saldo_devedor)}).`
+          : (V < row.saldo_devedor
+            ? `Abate parcial de ${money(V)}. Saldo restante: ${money(row.saldo_devedor - V)}.`
+            : `Quitação integral no valor de ${money(V)}.`));
+
+      // 1. Tentar gravar na tabela dedicada promissoria_pagamentos
+      try {
+        await supabase.from("promissoria_pagamentos").insert({
+          promissoria_id: row.id,
+          valor_pago: V,
+          operador_email: operadorEmail,
+          operador_id: operadorId,
+          data_pagamento: agoraIso,
+          detalhes: detalhesOp,
+        });
+      } catch (_) {}
+
+      // 2. Preparar array de logs serializado para salvar em origem como redundância imediata
+      let logsArray: any[] = [];
+      if (row.origem) {
+        try {
+          const parsed = JSON.parse(row.origem);
+          if (Array.isArray(parsed)) logsArray = parsed;
+        } catch (_) {}
+      }
+      logsArray.push({
+        data: agoraIso,
+        valor: V,
+        operador: operadorEmail,
+        detalhes: detalhesOp,
+      });
+      const origemComLogs = JSON.stringify(logsArray);
+
       if (temRateio) {
         // 1. Quitar a promissória atual com o valor recebido nesta baixa
         const novaDividaAtual = row.valor_pago + V;
@@ -551,6 +600,7 @@ export function BaixaDialog({
           .update({
             divida_total: novaDividaAtual,
             valor_pago: novaDividaAtual,
+            origem: origemComLogs,
           })
           .eq("id", row.id);
 
@@ -578,6 +628,7 @@ export function BaixaDialog({
             .update({
               divida_total: novaDivida,
               valor_pago: novaDivida,
+              origem: origemComLogs,
             })
             .eq("id", row.id);
           if (error) throw new Error(error.message);
@@ -588,6 +639,7 @@ export function BaixaDialog({
             .from("promissorias")
             .update({
               valor_pago: novoPago,
+              origem: origemComLogs,
             })
             .eq("id", row.id);
           if (error) throw new Error(error.message);
@@ -803,6 +855,202 @@ export function BaixaDialog({
           </button>
         </div>
       </form>
+    </Painel>
+  );
+}
+
+/**
+ * Modal para visualizar o histórico de auditoria e logs de baixa da promissória:
+ * data, valor pago, operador autenticado e detalhes da operação.
+ */
+export function LogDialog({
+  row,
+  onClose,
+}: {
+  row: Row;
+  onClose: () => void;
+}) {
+  const [logs, setLogs] = useState<{
+    id?: number;
+    data: string;
+    valor: number;
+    operador: string;
+    detalhes?: string;
+  }[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function carregarLogs() {
+      setLoading(true);
+      const lista: {
+        id?: number;
+        data: string;
+        valor: number;
+        operador: string;
+        detalhes?: string;
+      }[] = [];
+
+      // 1. Tentar ler da tabela promissoria_pagamentos
+      try {
+        const { data, error } = await supabase
+          .from("promissoria_pagamentos")
+          .select("*")
+          .eq("promissoria_id", row.id)
+          .order("data_pagamento", { ascending: false });
+
+        if (!error && data && data.length > 0) {
+          for (const p of data) {
+            lista.push({
+              id: p.id,
+              data: p.data_pagamento || p.created_at,
+              valor: p.valor_pago,
+              operador: p.operador_email || "Operador",
+              detalhes: p.detalhes,
+            });
+          }
+        }
+      } catch (_) {}
+
+      // 2. Tentar ler do JSON armazenado em row.origem
+      if (row.origem) {
+        try {
+          const parsed = JSON.parse(row.origem);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              const jaExiste = lista.some(
+                x => Math.abs(new Date(x.data).getTime() - new Date(item.data).getTime()) < 3000 && x.valor === item.valor
+              );
+              if (!jaExiste) {
+                lista.push({
+                  data: item.data,
+                  valor: item.valor,
+                  operador: item.operador,
+                  detalhes: item.detalhes,
+                });
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      // Ordenar do mais recente para o mais antigo
+      lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+      setLogs(lista);
+      setLoading(false);
+    }
+
+    carregarLogs();
+  }, [row]);
+
+  return (
+    <Painel onClose={onClose} wide>
+      <div style={{ padding: 20, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <h2 style={{ margin: 0 }}>Histórico de Auditoria da Promissória</h2>
+              <StatusPill r={row} />
+            </div>
+            <div className="sub" style={{ marginTop: 4 }}>
+              Registro de todas as baixas com data, valor e operador responsável
+            </div>
+          </div>
+          <button className="btn ghost" onClick={onClose}>Fechar</button>
+        </div>
+
+        {/* Card com resumo da promissória */}
+        <div style={{ background: "var(--soft)", padding: "12px 16px", borderRadius: 10, border: "1px solid var(--line)", display: "grid", gap: 6 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+            <div>
+              <span className="sub">Cliente:</span>
+              <div style={{ fontWeight: 700, fontSize: 16 }}>{row.cliente_nome}</div>
+            </div>
+            <div>
+              <span className="sub">Telefone:</span>
+              <div className="mono">{row.telefone || "—"}</div>
+            </div>
+            <div>
+              <span className="sub">Parcela:</span>
+              <div style={{ fontWeight: 600 }}>{row.parcelas || "1X"}</div>
+            </div>
+            <div>
+              <span className="sub">Vencimento:</span>
+              <div className="mono">{dt(row.vencimento)}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 20, marginTop: 4, borderTop: "1px solid var(--line)", paddingTop: 8, fontSize: 13, flexWrap: "wrap" }}>
+            <span>Dívida original: <b className="mono">{money(row.divida_total)}</b></span>
+            <span>Total pago: <b className="mono" style={{ color: "#15803d" }}>{money(row.valor_pago)}</b></span>
+            <span>Saldo devedor: <b className="mono">{money(row.saldo_devedor)}</b></span>
+          </div>
+        </div>
+
+        {/* Lista de Registros */}
+        <div>
+          <h3 style={{ margin: "8px 0 10px", fontSize: 15 }}>Registros de Auditoria</h3>
+          {loading ? (
+            <div className="sub" style={{ padding: 14 }}>Carregando histórico de auditoria…</div>
+          ) : logs.length > 0 ? (
+            <div style={{ display: "grid", gap: 10 }}>
+              {logs.map((item, idx) => (
+                <div
+                  key={idx}
+                  style={{
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 10,
+                    padding: "12px 16px",
+                    display: "grid",
+                    gap: 6,
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "#15803d", background: "#15803d15", padding: "3px 10px", borderRadius: 99 }}>
+                        Baixa de {money(item.valor)}
+                      </span>
+                      <span className="mono" style={{ fontSize: 13, color: "var(--ink)", fontWeight: 600 }}>
+                        {dtHora(item.data)}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--mut)" }}>
+                      Operador: <b style={{ color: "var(--ink)" }}>{item.operador}</b>
+                    </div>
+                  </div>
+                  {item.detalhes && (
+                    <div className="sub" style={{ fontSize: 13, color: "var(--mut)", marginTop: 2 }}>
+                      {item.detalhes}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div
+              style={{
+                background: "var(--soft)",
+                border: "1px dashed var(--line)",
+                borderRadius: 10,
+                padding: "18px 20px",
+                textAlign: "center",
+              }}
+            >
+              <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>
+                Nenhum log detalhado encontrado
+              </div>
+              <div className="sub" style={{ fontSize: 13 }}>
+                {row.valor_pago > 0
+                  ? `Esta promissória possui R$ ${(row.valor_pago / 100).toFixed(2)} registrado como pago no cadastro (${row.origem || "SISTEMA ANTERIOR"}). Todas as baixas realizadas no sistema registram data, valor e operador automaticamente nesta aba.`
+                  : "Nenhum pagamento foi registrado para esta promissória ainda."}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 8 }}>
+          <button className="btn ghost" onClick={onClose}>Fechar</button>
+        </div>
+      </div>
     </Painel>
   );
 }

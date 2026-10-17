@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { LBL, cls, deriveStatus, hoje, mensagemCobranca, money, somaDias } from "./lib";
 import type { Row, Status } from "./lib";
-import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog } from "./Dialogs";
+import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 
 type Resumo = {
   total: number; divida: number; pago: number; saldo: number; perdido: number; status: Record<Status, number>;
@@ -26,6 +26,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [sort, setSort] = useState("due");
   const [page, setPage] = useState(0);
   const [baixa, setBaixa] = useState<Row | null>(null);
+  const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | null | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState<Row | null>(null);
@@ -214,6 +215,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       Baixar
                     </button>
                   )}
+                  {r.valor_pago > 0 && (
+                    <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
+                      Ver log
+                    </button>
+                  )}
                   {!r.fundo_perdido && r.saldo_devedor > 0 && <button className="ed" onClick={() => setWhats(r)}>WhatsApp</button>}
                   {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
                   {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
@@ -230,6 +236,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         <button className="btn ghost" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>→</button>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
+      {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing !== undefined && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={whats.cliente_nome} telefone={whats.telefone} mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])} onClose={() => setWhats(null)} />}

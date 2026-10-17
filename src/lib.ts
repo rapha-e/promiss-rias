@@ -3,6 +3,7 @@ export type Row = {
   id: number; cliente_nome: string; telefone: string; divida_total: number; parcelas: string;
   valor_pago: number; saldo_devedor: number; vencimento: string | null; ano: number | null; status: Status;
   fundo_perdido: boolean; fundo_perdido_motivo: string | null; fundo_perdido_em: string | null;
+  origem?: string; created_at?: string; updated_at?: string;
 };
 export type Item = { valor: number; vencimento: string | null };
 
@@ -18,6 +19,24 @@ export const LBL: Record<Status, string> = {
 };
 export const cls = (s: Status) => (s === "A VENCER" ? "VENCER" : s.split(" ")[0]);
 export const dt = (d: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "Sem vencimento");
+export const dtHora = (iso?: string | null) => {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+};
 
 export function deriveStatus(r: {
   status?: string;

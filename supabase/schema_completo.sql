@@ -94,11 +94,25 @@ create trigger promissorias_updated_at
 before update on public.promissorias
 for each row execute function public.set_updated_at();
 
--- 5. Histórico e Auditoria de Baixas (Fundo Perdido)
+-- 5. Histórico e Auditoria de Baixas e Pagamentos
+create table if not exists public.promissoria_pagamentos (
+  id bigint generated always as identity primary key,
+  promissoria_id bigint not null references public.promissorias (id) on delete cascade,
+  valor_pago integer not null check (valor_pago > 0),
+  operador_email text not null default '',
+  operador_id uuid references auth.users (id) on delete set null,
+  data_pagamento timestamptz not null default now(),
+  detalhes text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists promissoria_pagamentos_promissoria_id_idx on public.promissoria_pagamentos (promissoria_id);
+create index if not exists promissoria_pagamentos_data_idx on public.promissoria_pagamentos (data_pagamento desc);
+
 create table if not exists public.promissoria_eventos (
   id bigint generated always as identity primary key,
   promissoria_id bigint not null references public.promissorias (id) on delete cascade,
-  tipo text not null check (tipo in ('FUNDO_PERDIDO', 'DESFEITO')),
+  tipo text not null check (tipo in ('FUNDO_PERDIDO', 'DESFEITO', 'BAIXA', 'PAGAMENTO')),
   motivo text,
   saldo_na_data integer,
   usuario_id uuid references auth.users (id) on delete set null,
@@ -268,6 +282,16 @@ create policy "promissorias: excluir (admin)" on public.promissorias
   for delete to authenticated using (public.is_admin());
 
 -- Eventos: leitura para autenticados; escrita via funções security definer
+alter table public.promissoria_pagamentos enable row level security;
+
+drop policy if exists "pagamentos: leitura" on public.promissoria_pagamentos;
+create policy "pagamentos: leitura" on public.promissoria_pagamentos
+  for select to authenticated using (true);
+
+drop policy if exists "pagamentos: inserir (admin)" on public.promissoria_pagamentos;
+create policy "pagamentos: inserir (admin)" on public.promissoria_pagamentos
+  for insert to authenticated with check (public.is_admin());
+
 drop policy if exists "eventos: leitura" on public.promissoria_eventos;
 create policy "eventos: leitura" on public.promissoria_eventos
   for select to authenticated using (true);

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
 import { dt, mensagemCobranca, money, normalizarTelefones } from "./lib";
 import type { Row } from "./lib";
-import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog } from "./Dialogs";
+import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 
 type Cli = {
   cliente: string; telefone: string; qtd: number; divida: number; pago: number; saldo: number;
@@ -14,6 +14,7 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
   const [rows, setRows] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [baixa, setBaixa] = useState<Row | null>(null);
+  const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
@@ -58,6 +59,11 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
                         Baixar
                       </button>
                     )}
+                    {r.valor_pago > 0 && (
+                      <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
+                        Ver log
+                      </button>
+                    )}
                     {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
                     {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
                   </td>
@@ -68,6 +74,7 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
         </div>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
+      {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={mensagemCobranca(c.cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}
