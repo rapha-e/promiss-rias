@@ -118,7 +118,8 @@ export function normalizarTelefones(texto: string, ddd = getDDD()): string[] {
 export const formatarTelefone = (n: string) => `+${n.slice(0, 2)} (${n.slice(2, 4)}) ${n.slice(4, n.length - 4)}-${n.slice(-4)}`;
 export const linkWhatsApp = (numero: string, msg: string) => `https://wa.me/${numero}?text=${encodeURIComponent(msg)}`;
 
-const titulo = (s: string) => s.toLocaleLowerCase("pt-BR").replace(/(^|\s)\S/g, c => c.toLocaleUpperCase("pt-BR"));
+export const titulo = (s: string) => s.toLocaleLowerCase("pt-BR").replace(/(^|\s)\S/g, c => c.toLocaleUpperCase("pt-BR"));
+
 export function mensagemCobranca(nome: string, itens: Item[]): string {
   const abertos = itens.filter(i => i.valor > 0).sort((a, b) => (a.vencimento ?? "").localeCompare(b.vencimento ?? ""));
   const total = abertos.reduce((s, i) => s + i.valor, 0);
@@ -130,6 +131,56 @@ export function mensagemCobranca(nome: string, itens: Item[]): string {
   });
   if (abertos.length > 8) linhas.push(`• e mais ${abertos.length - 8} promissória(s)`);
   return `Olá, ${primeiro}! Tudo bem?\n\nPassando para lembrar que consta em aberto ${abertos.length > 1 ? "os seguintes valores" : "o seguinte valor"}:\n${linhas.join("\n")}\n\nTotal: ${money(total)}\n\nSe já realizou o pagamento, por favor desconsidere esta mensagem. Qualquer dúvida, estou à disposição!`;
+}
+
+/**
+ * Gera mensagem de comprovante para envio no WhatsApp após registro de baixa.
+ * Contém: nome do pagador, valor pago, número da parcela, valor restante e data de pagamento.
+ */
+export function mensagemComprovanteBaixa(params: {
+  nome: string;
+  valorPago: number;
+  parcela: string;
+  valorRestante: number;
+  dataPagamento: string;
+  proximasParcelas?: { parcela: string; valor: number; vencimento: string | null }[];
+}): string {
+  const { nome, valorPago, parcela, valorRestante, dataPagamento, proximasParcelas } = params;
+  const primeiroNome = titulo(nome.trim().split(/\s+/)[0] || "Cliente");
+  
+  const rotuloParcela = parcela
+    ? (parcela.toUpperCase().includes("X") || parcela.includes("/") ? `Parcela ${parcela}` : parcela)
+    : "Promissória";
+
+  let textoRestante = "";
+  if (valorRestante <= 0) {
+    textoRestante = "R$ 0,00 (Dívida 100% quitada! 🎉)";
+  } else {
+    textoRestante = money(valorRestante);
+  }
+
+  let linhasProximas = "";
+  if (proximasParcelas && proximasParcelas.length > 0 && valorRestante > 0) {
+    const listagem = proximasParcelas.slice(0, 6).map(p => {
+      const v = p.vencimento ? dt(p.vencimento) : "A definir";
+      return `• Parcela ${p.parcela}: ${money(p.valor)} (venc. ${v})`;
+    });
+    if (proximasParcelas.length > 6) {
+      listagem.push(`• e mais ${proximasParcelas.length - 6} parcela(s)`);
+    }
+    linhasProximas = `\n\n*Próximos vencimentos:*\n${listagem.join("\n")}`;
+  }
+
+  return `*Comprovante de Pagamento — LeoÓticas.fin* 👓\n\n` +
+    `Olá, *${primeiroNome}*! Confirmamos o recebimento do seu pagamento com sucesso:\n\n` +
+    `• *Pagador:* ${nome}\n` +
+    `• *Valor pago:* ${money(valorPago)}\n` +
+    `• *Número da parcela:* ${rotuloParcela}\n` +
+    `• *Valor restante:* ${textoRestante}\n` +
+    `• *Data do pagamento:* ${dataPagamento}` +
+    `${linhasProximas}\n\n` +
+    `Agradecemos a sua preferência e confiança!\n` +
+    `Qualquer dúvida, estamos à disposição.`;
 }
 
 // CSV --------------------------------------------------------------------------

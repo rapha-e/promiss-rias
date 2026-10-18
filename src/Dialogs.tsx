@@ -3,7 +3,7 @@ import type { FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
-  getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, money, normalizarTelefones, parse, setDDD, somaDias, toBRL
+  getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL
 } from "./lib";
 import type { Row } from "./lib";
 
@@ -447,6 +447,15 @@ export function BaixaDialog({
   const [selecionadas, setSelecionadas] = useState<Set<number>>(new Set());
   const [recalcular, setRecalcular] = useState(true);
   const [opcaoSemRestantes, setOpcaoSemRestantes] = useState<"abater" | "quitar">("abater");
+  const [comprovante, setComprovante] = useState<{
+    mensagem: string;
+    telefone: string;
+    nome: string;
+  } | null>(null);
+  const [msgEditavel, setMsgEditavel] = useState("");
+  const [ddd, setDdd] = useState(getDDD());
+  const [selTel, setSelTel] = useState(0);
+  const [copiado, setCopiado] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -646,12 +655,169 @@ export function BaixaDialog({
         }
       }
 
+      // Calcular saldo restante e gerar mensagem de comprovante para o WhatsApp
+      const valorRestanteFinal = temRateio
+        ? saldoRestante
+        : (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar"
+          ? 0
+          : Math.max(0, row.saldo_devedor - V));
+
+      const proximasParcelasInfo = temRateio && saldoRestante > 0
+        ? simulacao.map(item => ({ parcela: item.parcelas, valor: item.novoSaldo, vencimento: item.vencimento }))
+        : undefined;
+
+      const textoComprovante = mensagemComprovanteBaixa({
+        nome: row.cliente_nome,
+        valorPago: V,
+        parcela: row.parcelas || "1X",
+        valorRestante: valorRestanteFinal,
+        dataPagamento: dtHora(agoraIso),
+        proximasParcelas: proximasParcelasInfo,
+      });
+
+      setMsgEditavel(textoComprovante);
+      setComprovante({
+        mensagem: textoComprovante,
+        telefone: row.telefone,
+        nome: row.cliente_nome,
+      });
       setBusy(false);
-      onSaved();
     } catch (e: any) {
       setBusy(false);
       setErr(e.message || "Erro ao registrar baixa.");
     }
+  }
+
+  // Tela de Comprovante de Pagamento (WhatsApp)
+  if (comprovante) {
+    const nums = normalizarTelefones(comprovante.telefone, ddd);
+    const numero = nums[Math.min(selTel, nums.length - 1)];
+
+    return (
+      <Painel onClose={() => { onClose(); onSaved(); }}>
+        <div style={{ padding: 20, display: "grid", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <h2 style={{ margin: 0, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>Comprovante WhatsApp</span>
+            </h2>
+            <span className="pill" style={{ background: "#15803d15", color: "#15803d", borderColor: "#15803d" }}>
+              ✓ Baixa efetuada
+            </span>
+          </div>
+
+          <div style={{ background: "#15803d15", border: "1px solid #15803d40", borderRadius: 10, padding: "10px 14px", fontSize: 13, color: "var(--ink)" }}>
+            <b>Baixa registrada com sucesso!</b> O comprovante foi gerado automaticamente para envio ao WhatsApp do pagador.
+          </div>
+
+          <div>
+            <b>{comprovante.nome}</b>
+            <div className="sub mono">Telefone cadastrado: {comprovante.telefone || "—"}</div>
+          </div>
+
+          <label>DDD padrão (para números sem DDD)
+            <input
+              value={ddd}
+              maxLength={2}
+              inputMode="numeric"
+              style={{ width: 80 }}
+              onChange={e => {
+                const val = e.target.value.replace(/\D/g, "");
+                setDdd(val);
+                if (val.length === 2) setDDD(val);
+              }}
+            />
+          </label>
+
+          {nums.length > 1 && (
+            <label>Selecione o número de WhatsApp
+              <select value={selTel} onChange={e => setSelTel(Number(e.target.value))}>
+                {nums.map((x, k) => <option key={x} value={k}>{formatarTelefone(x)}</option>)}
+              </select>
+            </label>
+          )}
+
+          {nums.length === 1 && (
+            <div className="sub">Enviar para <b className="mono">{formatarTelefone(nums[0])}</b></div>
+          )}
+
+          {!nums.length && (
+            <div className="err">Nenhum telefone válido encontrado. Você pode copiar a mensagem abaixo para enviar manualmente.</div>
+          )}
+
+          <label>Mensagem do comprovante (revise ou edite antes de enviar):
+            <textarea
+              rows={12}
+              value={msgEditavel}
+              onChange={e => setMsgEditavel(e.target.value)}
+              style={{ fontSize: 13, lineHeight: 1.45 }}
+            />
+          </label>
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "space-between", alignItems: "center" }}>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => {
+                navigator.clipboard.writeText(msgEditavel);
+                setCopiado(true);
+                setTimeout(() => setCopiado(false), 2500);
+              }}
+            >
+              {copiado ? "✓ Mensagem copiada!" : "Copiar mensagem"}
+            </button>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => {
+                  onClose();
+                  onSaved();
+                }}
+              >
+                Concluir
+              </button>
+              {numero ? (
+                <a
+                  className="btn"
+                  style={{
+                    background: "#15803d",
+                    borderColor: "#15803d",
+                    color: "#fff",
+                    textDecoration: "none",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                  href={linkWhatsApp(numero, msgEditavel)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => {
+                    setTimeout(() => {
+                      onClose();
+                      onSaved();
+                    }, 500);
+                  }}
+                >
+                  Abrir WhatsApp
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    onClose();
+                    onSaved();
+                  }}
+                >
+                  Concluir
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </Painel>
+    );
   }
 
   const isDiferente = ok && V !== row.saldo_devedor;
@@ -878,6 +1044,7 @@ export function LogDialog({
     detalhes?: string;
   }[]>([]);
   const [loading, setLoading] = useState(true);
+  const [whatsLog, setWhatsLog] = useState<string | null>(null);
 
   useEffect(() => {
     async function carregarLogs() {
@@ -1013,8 +1180,28 @@ export function LogDialog({
                         {dtHora(item.data)}
                       </span>
                     </div>
-                    <div style={{ fontSize: 12, color: "var(--mut)" }}>
-                      Operador: <b style={{ color: "var(--ink)" }}>{item.operador}</b>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <div style={{ fontSize: 12, color: "var(--mut)" }}>
+                        Operador: <b style={{ color: "var(--ink)" }}>{item.operador}</b>
+                      </div>
+                      <button
+                        type="button"
+                        className="ed"
+                        style={{ fontSize: 11, padding: "2px 8px" }}
+                        title="Enviar comprovante deste pagamento por WhatsApp"
+                        onClick={() => {
+                          const msg = mensagemComprovanteBaixa({
+                            nome: row.cliente_nome,
+                            valorPago: item.valor,
+                            parcela: row.parcelas || "1X",
+                            valorRestante: row.saldo_devedor,
+                            dataPagamento: dtHora(item.data),
+                          });
+                          setWhatsLog(msg);
+                        }}
+                      >
+                        Comprovante WhatsApp
+                      </button>
                     </div>
                   </div>
                   {item.detalhes && (
@@ -1051,6 +1238,14 @@ export function LogDialog({
           <button className="btn ghost" onClick={onClose}>Fechar</button>
         </div>
       </div>
+      {whatsLog && (
+        <WhatsDialog
+          nome={row.cliente_nome}
+          telefone={row.telefone}
+          mensagem={whatsLog}
+          onClose={() => setWhatsLog(null)}
+        />
+      )}
     </Painel>
   );
 }
