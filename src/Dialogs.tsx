@@ -46,18 +46,18 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const ok = !isNaN(T) && !isNaN(G);
   const isNova = !row;
 
+  const saldoAParcelar = Math.max(0, T - G);
+
   // Cálculo e divisão das promissórias (a cada 30 dias após o 1º vencimento)
+  // A entrada é abatida da dívida total antes da divisão entre as promissórias
   const parcelasCalculadas = useMemo(() => {
-    if (!isNova || !ok || T <= 0 || qtd <= 0) return [];
-    const base = Math.floor(T / qtd);
-    const resto = T % qtd;
-    let restantePago = G;
+    if (!isNova || !ok || T <= 0 || qtd <= 0 || saldoAParcelar <= 0) return [];
+    const base = Math.floor(saldoAParcelar / qtd);
+    const resto = saldoAParcelar % qtd;
 
     return Array.from({ length: qtd }, (_, idx) => {
       const num = idx + 1;
       const valor = base + (idx === 0 ? resto : 0);
-      const pago = Math.min(restantePago, valor);
-      restantePago = Math.max(0, restantePago - pago);
       const vencimento = d ? somaDias(d, idx * 30) : null;
       const rotulo = qtd === 1 ? "1X" : `${num}/${qtd}`;
 
@@ -65,12 +65,12 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         numero: num,
         parcela: rotulo,
         valor,
-        pago,
-        saldo: Math.max(0, valor - pago),
+        pago: 0,
+        saldo: valor,
         vencimento,
       };
     });
-  }, [isNova, ok, T, qtd, G, d]);
+  }, [isNova, ok, T, qtd, saldoAParcelar, d]);
 
   const st = ok ? derive(T, G, d) : null;
 
@@ -78,6 +78,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     e.preventDefault();
     if (n.trim().length < 2) return setErr("Informe o nome do cliente.");
     if (!ok) return setErr("Valores devem ser monetários e não negativos.");
+    if (isNova && G >= T) return setErr("O valor da entrada não pode ser igual ou maior que o valor total da dívida.");
+    if (isNova && parcelasCalculadas.length === 0) return setErr("Informe um valor total válido a parcelar.");
     if (!d) return setErr("Informe a data de vencimento.");
 
     setBusy(true);
@@ -163,6 +165,13 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               </label>
             </div>
 
+            {/* Aviso caso a entrada cubra ou ultrapasse a dívida */}
+            {ok && T > 0 && G >= T && (
+              <div style={{ background: "rgba(239, 68, 68, 0.1)", color: "#b91c1c", padding: "8px 12px", borderRadius: 8, fontSize: 12, marginTop: 6, fontWeight: 500 }}>
+                A entrada ({money(G)}) é igual ou superior ao valor total ({money(T)}). Nenhuma promissória a parcelar.
+              </div>
+            )}
+
             {/* Pré-visualização de todas as promissórias calculadas */}
             {parcelasCalculadas.length > 0 && (
               <div
@@ -171,15 +180,21 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                   borderRadius: 10,
                   padding: "12px 14px",
                   border: "1px solid var(--line)",
-                  marginTop: 4,
+                  marginTop: 6,
                   maxHeight: 220,
                   overflowY: "auto",
                 }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: G > 0 ? 4 : 8, fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
                   <span>PROMISSÓRIAS CALCULADAS ({qtd}x)</span>
                   <span>A CADA 30 DIAS</span>
                 </div>
+                {G > 0 && (
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 11, color: "var(--mut)", background: "rgba(0,0,0,0.03)", padding: "4px 8px", borderRadius: 6 }}>
+                    <span>Entrada: <strong style={{ color: "var(--fg)" }}>{money(G)}</strong></span>
+                    <span>Saldo a parcelar: <strong className="mono" style={{ color: "var(--fg)" }}>{money(saldoAParcelar)}</strong></span>
+                  </div>
+                )}
                 <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse", minWidth: 0 }}>
                   <thead>
                     <tr style={{ color: "var(--mut)", fontSize: 11, borderBottom: "1px solid var(--line)" }}>
