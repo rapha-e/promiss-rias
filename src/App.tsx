@@ -8,15 +8,22 @@ import Relatorio from "./Relatorio";
 import logo from "./logo.png";
 
 function Login() {
-  const [email, setEmail] = useState("");
+  const [usuario, setUsuario] = useState("");
   const [pw, setPw] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   async function go(e: FormEvent) {
     e.preventDefault();
     setBusy(true); setErr("");
-    const { error } = await supabase.auth.signInWithPassword({ email, password: pw });
-    if (error) setErr("E-mail ou senha inválidos.");
+    let loginEmail = usuario.trim();
+    if (!loginEmail.includes("@")) {
+      const u = loginEmail.toLowerCase();
+      if (u === "suporte") loginEmail = "suporte@leooticas.com.br";
+      else if (u === "leooticas") loginEmail = "leooticas@leooticas.com.br";
+      else loginEmail = `${u}@leooticas.com.br`;
+    }
+    const { error } = await supabase.auth.signInWithPassword({ email: loginEmail, password: pw });
+    if (error) setErr("Usuário/e-mail ou senha inválidos.");
     setBusy(false);
   }
   return (
@@ -27,7 +34,7 @@ function Login() {
           <div className="brand">LeoÓticas<i>.</i>fin</div>
           <div className="sub">Promissórias Loja — acesso restrito</div>
         </div>
-        <label>E-mail<input type="email" required value={email} onChange={e => setEmail(e.target.value)} /></label>
+        <label>Usuário ou E-mail<input type="text" required autoCapitalize="none" autoCorrect="off" value={usuario} onChange={e => setUsuario(e.target.value)} /></label>
         <label>Senha<input type="password" required value={pw} onChange={e => setPw(e.target.value)} /></label>
         <div className="err">{err}</div>
         <button className="btn" disabled={busy}>{busy ? "Entrando…" : "Entrar"}</button>

@@ -15,10 +15,23 @@ const faixas: [string, (d: number) => boolean][] = [
   ["91–365 dias", d => d >= 91 && d <= 365], ["Mais de 1 ano", d => d > 365],
 ];
 
+const ANOS_DISPONIVEIS = Array.from({ length: 15 }, (_, i) => 2020 + i);
+
+function ultimoDiaDoMes(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 0));
+  return d.toISOString().slice(0, 10);
+}
+
 export default function Relatorio() {
   const [sit, setSit] = useState<Sit>("vencidas");
+  const [tipoPeriodo, setTipoPeriodo] = useState<"dia" | "mes" | "ano">("dia");
   const [ini, setIni] = useState("");
   const [fim, setFim] = useState("");
+  const [mesIni, setMesIni] = useState("");
+  const [mesFim, setMesFim] = useState("");
+  const [anoIni, setAnoIni] = useState("");
+  const [anoFim, setAnoFim] = useState("");
   const [activePreset, setActivePreset] = useState<string>("vencidas");
   const [sortCol, setSortCol] = useState<string>("vencimento");
   const [sortAsc, setSortAsc] = useState<boolean>(true);
@@ -83,17 +96,78 @@ export default function Relatorio() {
     }
   };
 
-  function preset(p: "vencidas" | "7" | "30" | "mes") {
+  function preset(p: "vencidas" | "7" | "30" | "mes" | "prox_mes" | "ano") {
     setActivePreset(p);
     const h = hoje();
-    if (p === "vencidas") { setSit("vencidas"); setIni(""); setFim(""); }
-    if (p === "7") { setSit("a_vencer"); setIni(h); setFim(somaDias(h, 7)); }
-    if (p === "30") { setSit("a_vencer"); setIni(h); setFim(somaDias(h, 30)); }
+    const y = +h.slice(0, 4);
+    const m = +h.slice(5, 7);
+
+    if (p === "vencidas") {
+      setTipoPeriodo("dia");
+      setSit("vencidas");
+      setIni(""); setFim("");
+      setMesIni(""); setMesFim("");
+      setAnoIni(""); setAnoFim("");
+    }
+    if (p === "7") {
+      setTipoPeriodo("dia");
+      setSit("a_vencer");
+      setIni(h); setFim(somaDias(h, 7));
+      setMesIni(""); setMesFim("");
+      setAnoIni(""); setAnoFim("");
+    }
+    if (p === "30") {
+      setTipoPeriodo("dia");
+      setSit("a_vencer");
+      setIni(h); setFim(somaDias(h, 30));
+      setMesIni(""); setMesFim("");
+      setAnoIni(""); setAnoFim("");
+    }
     if (p === "mes") {
-      const y = +h.slice(0, 4), m = +h.slice(5, 7);
-      setSit("todas"); setIni(`${h.slice(0, 7)}-01`); setFim(new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10));
+      setTipoPeriodo("mes");
+      setSit("todas");
+      const ym = h.slice(0, 7);
+      setMesIni(ym);
+      setMesFim(ym);
+      setIni(`${ym}-01`);
+      setFim(new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10));
+      setAnoIni(""); setAnoFim("");
+    }
+    if (p === "prox_mes") {
+      setTipoPeriodo("mes");
+      setSit("todas");
+      const nextDate = new Date(Date.UTC(y, m, 1));
+      const ny = nextDate.getUTCFullYear();
+      const nm = String(nextDate.getUTCMonth() + 1).padStart(2, "0");
+      const ym = `${ny}-${nm}`;
+      setMesIni(ym);
+      setMesFim(ym);
+      setIni(`${ym}-01`);
+      setFim(new Date(Date.UTC(ny, nextDate.getUTCMonth() + 1, 0)).toISOString().slice(0, 10));
+      setAnoIni(""); setAnoFim("");
+    }
+    if (p === "ano") {
+      setTipoPeriodo("ano");
+      setSit("todas");
+      const sy = String(y);
+      setAnoIni(sy);
+      setAnoFim(sy);
+      setIni(`${sy}-01-01`);
+      setFim(`${sy}-12-31`);
+      setMesIni(""); setMesFim("");
     }
   }
+
+  const limparPeriodo = () => {
+    setIni("");
+    setFim("");
+    setMesIni("");
+    setMesFim("");
+    setAnoIni("");
+    setAnoFim("");
+    setActivePreset("");
+  };
+
   const situacaoTxt = (r: Rel) => r.dias_atraso > 0 ? `${r.dias_atraso} ${r.dias_atraso === 1 ? "dia" : "dias"} de atraso`
     : (() => { const d = diffDias(r.vencimento, hoje()); return d === 0 ? "Vence hoje" : `Vence em ${d} ${d === 1 ? "dia" : "dias"}`; })();
   const periodo = `${SIT[sit]}${ini ? ` · de ${dt(ini)}` : ""}${fim ? ` até ${dt(fim)}` : ""}`;
@@ -120,14 +194,123 @@ export default function Relatorio() {
         <button className={`chip ${activePreset === "7" ? "on" : ""}`} onClick={() => preset("7")}>Próximos 7 dias</button>
         <button className={`chip ${activePreset === "30" ? "on" : ""}`} onClick={() => preset("30")}>Próximos 30 dias</button>
         <button className={`chip ${activePreset === "mes" ? "on" : ""}`} onClick={() => preset("mes")}>Mês atual</button>
+        <button className={`chip ${activePreset === "prox_mes" ? "on" : ""}`} onClick={() => preset("prox_mes")}>Próximo mês</button>
+        <button className={`chip ${activePreset === "ano" ? "on" : ""}`} onClick={() => preset("ano")}>Este ano</button>
       </div>
-      <div className="bar noprint">
+      <div className="bar noprint" style={{ flexWrap: "wrap", gap: 10 }}>
         <select value={sit} onChange={e => { setSit(e.target.value as Sit); setActivePreset(""); }} aria-label="Situação">
           {(Object.keys(SIT) as Sit[]).map(k => <option key={k} value={k}>{SIT[k]}</option>)}
         </select>
-        <label className="inl">De <input type="date" value={ini} onChange={e => { setIni(e.target.value); setActivePreset(""); }} /></label>
-        <label className="inl">Até <input type="date" value={fim} onChange={e => { setFim(e.target.value); setActivePreset(""); }} /></label>
-        {(ini || fim) && <button className="btn ghost" onClick={() => { setIni(""); setFim(""); setActivePreset(""); }}>Limpar período</button>}
+        <select
+          value={tipoPeriodo}
+          onChange={e => {
+            setTipoPeriodo(e.target.value as "dia" | "mes" | "ano");
+            setActivePreset("");
+          }}
+          aria-label="Tipo de intervalo"
+          style={{ fontWeight: 600 }}
+        >
+          <option value="dia">📅 Intervalo em dias</option>
+          <option value="mes">🗓️ Intervalo em meses</option>
+          <option value="ano">📆 Intervalo em anos</option>
+        </select>
+
+        {tipoPeriodo === "dia" && (
+          <>
+            <label className="inl">De <input type="date" value={ini} onChange={e => { setIni(e.target.value); setActivePreset(""); }} /></label>
+            <label className="inl">Até <input type="date" value={fim} onChange={e => { setFim(e.target.value); setActivePreset(""); }} /></label>
+          </>
+        )}
+
+        {tipoPeriodo === "mes" && (
+          <>
+            <label className="inl">
+              De
+              <input
+                type="month"
+                value={mesIni}
+                onChange={e => {
+                  const v = e.target.value;
+                  setMesIni(v);
+                  if (v) {
+                    setIni(`${v}-01`);
+                    if (!mesFim || mesFim < v) {
+                      setMesFim(v);
+                      setFim(ultimoDiaDoMes(v));
+                    }
+                  } else {
+                    setIni("");
+                  }
+                  setActivePreset("");
+                }}
+              />
+            </label>
+            <label className="inl">
+              Até
+              <input
+                type="month"
+                value={mesFim}
+                onChange={e => {
+                  const v = e.target.value;
+                  setMesFim(v);
+                  if (v) setFim(ultimoDiaDoMes(v));
+                  else setFim("");
+                  setActivePreset("");
+                }}
+              />
+            </label>
+          </>
+        )}
+
+        {tipoPeriodo === "ano" && (
+          <>
+            <label className="inl">
+              De
+              <select
+                value={anoIni}
+                onChange={e => {
+                  const a = e.target.value;
+                  setAnoIni(a);
+                  if (a) {
+                    setIni(`${a}-01-01`);
+                    if (!anoFim || anoFim < a) {
+                      setAnoFim(a);
+                      setFim(`${a}-12-31`);
+                    }
+                  } else {
+                    setIni("");
+                  }
+                  setActivePreset("");
+                }}
+              >
+                <option value="">Selecione o ano</option>
+                {ANOS_DISPONIVEIS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+            <label className="inl">
+              Até
+              <select
+                value={anoFim}
+                onChange={e => {
+                  const a = e.target.value;
+                  setAnoFim(a);
+                  if (a) setFim(`${a}-12-31`);
+                  else setFim("");
+                  setActivePreset("");
+                }}
+              >
+                <option value="">Selecione o ano</option>
+                {ANOS_DISPONIVEIS.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+          </>
+        )}
+
+        {(ini || fim || mesIni || mesFim || anoIni || anoFim) && (
+          <button className="btn ghost" onClick={limparPeriodo}>
+            Limpar período
+          </button>
+        )}
       </div>
       <section className="kpis">
         <div className="card hl"><small>Saldo no filtro</small><b>{money(tot.saldo)}</b></div>
