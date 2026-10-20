@@ -16,6 +16,14 @@ import { SortIcon } from "./SortIcon";
 
 type VencFiltro = "" | "vencidas" | "d1" | "d7" | "d30";
 
+const ANOS_DISPONIVEIS = Array.from({ length: 15 }, (_, i) => 2020 + i);
+
+function ultimoDiaDoMes(yyyyMm: string): string {
+  const [y, m] = yyyyMm.split("-").map(Number);
+  const d = new Date(Date.UTC(y, m, 0));
+  return d.toISOString().slice(0, 10);
+}
+
 export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
@@ -24,7 +32,13 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [qd, setQd] = useState("");
   const [status, setStatus] = useState("");
   const [venc, setVenc] = useState<VencFiltro>("");
-  const [year, setYear] = useState("");
+  const [tipoPeriodo, setTipoPeriodo] = useState<"todos" | "mes" | "ano" | "dia">("todos");
+  const [ini, setIni] = useState("");
+  const [fim, setFim] = useState("");
+  const [mesIni, setMesIni] = useState("");
+  const [mesFim, setMesFim] = useState("");
+  const [anoIni, setAnoIni] = useState("");
+  const [anoFim, setAnoFim] = useState("");
   const [sortCol, setSortCol] = useState("vencimento");
   const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(0);
@@ -83,7 +97,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     else if (status === "NÃO PAGOU") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).lt("vencimento", h);
     else if (status === "FUNDO PERDIDO") query = query.eq("fundo_perdido", true);
 
-    if (year) query = query.eq("ano", Number(year));
+    if (ini) query = query.gte("vencimento", ini);
+    if (fim) query = query.lte("vencimento", fim);
 
     if (venc === "vencidas") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
     else if (venc === "d1") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 1));
@@ -100,7 +115,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const { data, count: c, error } = await query.order("id").range(page * PS, page * PS + PS - 1);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, year, sortCol, sortAsc, page, venc]);
+  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc]);
 
   useEffect(() => { loadResumo(); }, [loadResumo]);
   useEffect(() => { loadRows(); }, [loadRows]);
@@ -118,6 +133,19 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     ["FUNDO PERDIDO", "Fundo perdido", st?.["FUNDO PERDIDO"] ?? 0],
   ];
   const reset = () => setPage(0);
+
+  const anosLista = Array.from(new Set([...(resumo?.anos ?? []), ...ANOS_DISPONIVEIS])).sort((a, b) => a - b);
+
+  const limparPeriodo = () => {
+    setTipoPeriodo("todos");
+    setIni("");
+    setFim("");
+    setMesIni("");
+    setMesFim("");
+    setAnoIni("");
+    setAnoFim("");
+    reset();
+  };
 
   const toggleVenc = (f: VencFiltro) => {
     if (venc === f) {
@@ -212,12 +240,122 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <button key={k} className={`chip ${status === k ? "on" : ""}`} onClick={() => { setStatus(k); reset(); }}>{l} · {n.toLocaleString("pt-BR")}</button>
         ))}
       </div>
-      <div className="bar">
+      <div className="bar" style={{ flexWrap: "wrap", gap: 10 }}>
         <input type="search" placeholder="Buscar por cliente ou telefone" value={q} onChange={e => setQ(e.target.value)} />
-        <select value={year} onChange={e => { setYear(e.target.value); reset(); }}>
-          <option value="">Todos os anos</option>
-          {(resumo?.anos ?? []).map(y => <option key={y}>{y}</option>)}
+
+        <select
+          value={tipoPeriodo}
+          onChange={e => {
+            const t = e.target.value as "todos" | "mes" | "ano" | "dia";
+            setTipoPeriodo(t);
+            if (t === "todos") limparPeriodo();
+            reset();
+          }}
+          aria-label="Tipo de período"
+          style={{ fontWeight: 600 }}
+        >
+          <option value="todos">Todos os períodos</option>
+          <option value="mes">🗓️ Intervalo em meses</option>
+          <option value="ano">📆 Intervalo em anos</option>
+          <option value="dia">📅 Intervalo em dias</option>
         </select>
+
+        {tipoPeriodo === "mes" && (
+          <>
+            <label className="inl">
+              De
+              <input
+                type="month"
+                value={mesIni}
+                onChange={e => {
+                  const v = e.target.value;
+                  setMesIni(v);
+                  if (v) {
+                    setIni(`${v}-01`);
+                    if (!mesFim || mesFim < v) {
+                      setMesFim(v);
+                      setFim(ultimoDiaDoMes(v));
+                    }
+                  } else {
+                    setIni("");
+                  }
+                  reset();
+                }}
+              />
+            </label>
+            <label className="inl">
+              Até
+              <input
+                type="month"
+                value={mesFim}
+                onChange={e => {
+                  const v = e.target.value;
+                  setMesFim(v);
+                  if (v) setFim(ultimoDiaDoMes(v));
+                  else setFim("");
+                  reset();
+                }}
+              />
+            </label>
+          </>
+        )}
+
+        {tipoPeriodo === "ano" && (
+          <>
+            <label className="inl">
+              De
+              <select
+                value={anoIni}
+                onChange={e => {
+                  const a = e.target.value;
+                  setAnoIni(a);
+                  if (a) {
+                    setIni(`${a}-01-01`);
+                    if (!anoFim || anoFim < a) {
+                      setAnoFim(a);
+                      setFim(`${a}-12-31`);
+                    }
+                  } else {
+                    setIni("");
+                  }
+                  reset();
+                }}
+              >
+                <option value="">Selecione o ano</option>
+                {anosLista.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+            <label className="inl">
+              Até
+              <select
+                value={anoFim}
+                onChange={e => {
+                  const a = e.target.value;
+                  setAnoFim(a);
+                  if (a) setFim(`${a}-12-31`);
+                  else setFim("");
+                  reset();
+                }}
+              >
+                <option value="">Selecione o ano</option>
+                {anosLista.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </label>
+          </>
+        )}
+
+        {tipoPeriodo === "dia" && (
+          <>
+            <label className="inl">De <input type="date" value={ini} onChange={e => { setIni(e.target.value); reset(); }} /></label>
+            <label className="inl">Até <input type="date" value={fim} onChange={e => { setFim(e.target.value); reset(); }} /></label>
+          </>
+        )}
+
+        {(tipoPeriodo !== "todos" || ini || fim || mesIni || mesFim || anoIni || anoFim) && (
+          <button className="btn ghost" onClick={limparPeriodo}>
+            Limpar período
+          </button>
+        )}
         <select
           value={`${sortCol}:${sortAsc ? "asc" : "desc"}`}
           onChange={e => {
