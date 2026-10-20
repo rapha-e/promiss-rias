@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import { baixarCSV, diffDias, dt, hoje, mensagemCobranca, money, normalizarTelefones, somaDias, toBRL } from "./lib";
 import { FichaCliente, WhatsDialog } from "./Dialogs";
+import { SortIcon } from "./SortIcon";
 
 type Rel = {
   id: number; cliente_nome: string; telefone: string; parcelas: string; divida_total: number;
@@ -18,6 +19,9 @@ export default function Relatorio() {
   const [sit, setSit] = useState<Sit>("vencidas");
   const [ini, setIni] = useState("");
   const [fim, setFim] = useState("");
+  const [activePreset, setActivePreset] = useState<string>("vencidas");
+  const [sortCol, setSortCol] = useState<string>("vencimento");
+  const [sortAsc, setSortAsc] = useState<boolean>(true);
   const [rows, setRows] = useState<Rel[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -49,7 +53,38 @@ export default function Relatorio() {
     };
   }, [rows]);
 
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      let va: any = a[sortCol as keyof Rel];
+      let vb: any = b[sortCol as keyof Rel];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === "string") {
+        const cmp = va.localeCompare(vb, "pt-BR", { sensitivity: "base" });
+        return sortAsc ? cmp : -cmp;
+      }
+      return sortAsc ? va - vb : vb - va;
+    });
+  }, [rows, sortCol, sortAsc]);
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortAsc(a => !a);
+    } else {
+      setSortCol(col);
+      if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor") {
+        setSortAsc(false);
+      } else if (col === "dias_atraso") {
+        setSortAsc(false);
+      } else {
+        setSortAsc(true);
+      }
+    }
+  };
+
   function preset(p: "vencidas" | "7" | "30" | "mes") {
+    setActivePreset(p);
     const h = hoje();
     if (p === "vencidas") { setSit("vencidas"); setIni(""); setFim(""); }
     if (p === "7") { setSit("a_vencer"); setIni(h); setFim(somaDias(h, 7)); }
@@ -66,7 +101,7 @@ export default function Relatorio() {
   function exportar() {
     baixarCSV(`relatorio-vencimentos-${hoje()}.csv`,
       ["Cliente", "Telefone", "Parcelas", "Vencimento", "Dias de atraso", "Dívida (R$)", "Pago (R$)", "Saldo (R$)"],
-      rows.map(r => [r.cliente_nome, r.telefone, r.parcelas, dt(r.vencimento), r.dias_atraso, toBRL(r.divida_total), toBRL(r.valor_pago), toBRL(r.saldo_devedor)]));
+      sortedRows.map(r => [r.cliente_nome, r.telefone, r.parcelas, dt(r.vencimento), r.dias_atraso, toBRL(r.divida_total), toBRL(r.valor_pago), toBRL(r.saldo_devedor)]));
   }
 
   return (
@@ -81,18 +116,18 @@ export default function Relatorio() {
       <div className="printonly"><h1>LeoÓticas.fin — Relatório de vencimentos</h1><div>{periodo} · emitido em {dt(hoje())}</div></div>
       {error && <div className="warn">Erro: {error}</div>}
       <div className="chips noprint">
-        <button className="chip" onClick={() => preset("vencidas")}>Vencidas</button>
-        <button className="chip" onClick={() => preset("7")}>Próximos 7 dias</button>
-        <button className="chip" onClick={() => preset("30")}>Próximos 30 dias</button>
-        <button className="chip" onClick={() => preset("mes")}>Mês atual</button>
+        <button className={`chip ${activePreset === "vencidas" ? "on" : ""}`} onClick={() => preset("vencidas")}>Vencidas</button>
+        <button className={`chip ${activePreset === "7" ? "on" : ""}`} onClick={() => preset("7")}>Próximos 7 dias</button>
+        <button className={`chip ${activePreset === "30" ? "on" : ""}`} onClick={() => preset("30")}>Próximos 30 dias</button>
+        <button className={`chip ${activePreset === "mes" ? "on" : ""}`} onClick={() => preset("mes")}>Mês atual</button>
       </div>
       <div className="bar noprint">
-        <select value={sit} onChange={e => setSit(e.target.value as Sit)} aria-label="Situação">
+        <select value={sit} onChange={e => { setSit(e.target.value as Sit); setActivePreset(""); }} aria-label="Situação">
           {(Object.keys(SIT) as Sit[]).map(k => <option key={k} value={k}>{SIT[k]}</option>)}
         </select>
-        <label className="inl">De <input type="date" value={ini} onChange={e => setIni(e.target.value)} /></label>
-        <label className="inl">Até <input type="date" value={fim} onChange={e => setFim(e.target.value)} /></label>
-        {(ini || fim) && <button className="btn ghost" onClick={() => { setIni(""); setFim(""); }}>Limpar período</button>}
+        <label className="inl">De <input type="date" value={ini} onChange={e => { setIni(e.target.value); setActivePreset(""); }} /></label>
+        <label className="inl">Até <input type="date" value={fim} onChange={e => { setFim(e.target.value); setActivePreset(""); }} /></label>
+        {(ini || fim) && <button className="btn ghost" onClick={() => { setIni(""); setFim(""); setActivePreset(""); }}>Limpar período</button>}
       </div>
       <section className="kpis">
         <div className="card hl"><small>Saldo no filtro</small><b>{money(tot.saldo)}</b></div>
@@ -109,9 +144,34 @@ export default function Relatorio() {
       )}
       <div className="wrap">
         <table>
-          <thead><tr><th>Cliente</th><th>Telefone</th><th>Vencimento</th><th>Situação</th><th className="n">Dívida</th><th className="n">Pago</th><th className="n">Saldo</th><th className="noprint" /></tr></thead>
+          <thead>
+            <tr>
+              <th className={`sortable ${sortCol === "cliente_nome" ? "active" : ""}`} onClick={() => handleSort("cliente_nome")} title="Clique para ordenar por Cliente">
+                <span className="th-content">Cliente <SortIcon col="cliente_nome" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "telefone" ? "active" : ""}`} onClick={() => handleSort("telefone")} title="Clique para ordenar por Telefone">
+                <span className="th-content">Telefone <SortIcon col="telefone" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "vencimento" ? "active" : ""}`} onClick={() => handleSort("vencimento")} title="Clique para ordenar por Vencimento">
+                <span className="th-content">Vencimento <SortIcon col="vencimento" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "dias_atraso" ? "active" : ""}`} onClick={() => handleSort("dias_atraso")} title="Clique para ordenar por Situação">
+                <span className="th-content">Situação <SortIcon col="dias_atraso" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "divida_total" ? "active" : ""}`} onClick={() => handleSort("divida_total")} title="Clique para ordenar por Dívida">
+                <span className="th-content">Dívida <SortIcon col="divida_total" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "valor_pago" ? "active" : ""}`} onClick={() => handleSort("valor_pago")} title="Clique para ordenar por Valor Pago">
+                <span className="th-content">Pago <SortIcon col="valor_pago" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "saldo_devedor" ? "active" : ""}`} onClick={() => handleSort("saldo_devedor")} title="Clique para ordenar por Saldo Devedor">
+                <span className="th-content">Saldo <SortIcon col="saldo_devedor" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className="noprint" />
+            </tr>
+          </thead>
           <tbody>
-            {rows.map(r => (
+            {sortedRows.map(r => (
               <tr key={r.id}>
                 <td className={r.dias_atraso > 0 ? "s-NÃO" : "s-PAGANDO"}>
                   <button

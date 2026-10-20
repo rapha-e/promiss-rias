@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import { dt, mensagemCobranca, money, normalizarTelefones } from "./lib";
 import type { Row } from "./lib";
 import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
+import { SortIcon } from "./SortIcon";
 
 type Cli = {
   cliente: string; telefone: string; qtd: number; divida: number; pago: number; saldo: number;
@@ -18,6 +19,9 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
+  const [sortCol, setSortCol] = useState<string>("vencimento");
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
+
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc("cliente_promissorias", { p_cliente: c.cliente });
     if (error) setErr(error.message); else setRows((data ?? []) as Row[]);
@@ -26,6 +30,39 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
   const abertos = rows.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
   const tot = rows.reduce((a, r) => ({ d: a.d + r.divida_total, p: a.p + r.valor_pago, s: a.s + (r.fundo_perdido ? 0 : r.saldo_devedor), f: a.f + (r.fundo_perdido ? r.saldo_devedor : 0) }), { d: 0, p: 0, s: 0, f: 0 });
   const refresh = () => { load(); onChanged(); };
+
+  const sortedRows = useMemo(() => {
+    return [...rows].sort((a, b) => {
+      let va: any = a[sortCol as keyof Row];
+      let vb: any = b[sortCol as keyof Row];
+      if (sortCol === "status") {
+        va = a.fundo_perdido ? "FUNDO PERDIDO" : a.status;
+        vb = b.fundo_perdido ? "FUNDO PERDIDO" : b.status;
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === "string") {
+        const cmp = va.localeCompare(vb, "pt-BR", { sensitivity: "base" });
+        return sortAsc ? cmp : -cmp;
+      }
+      return sortAsc ? va - vb : vb - va;
+    });
+  }, [rows, sortCol, sortAsc]);
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortAsc(a => !a);
+    } else {
+      setSortCol(col);
+      if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor") {
+        setSortAsc(false);
+      } else {
+        setSortAsc(true);
+      }
+    }
+  };
+
   return (
     <Painel onClose={onClose} wide>
       <div style={{ padding: 20, display: "grid", gap: 14 }}>
@@ -43,9 +80,31 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
         </div>
         <div className="wrap">
           <table style={{ minWidth: 640 }}>
-            <thead><tr><th>Vencimento</th><th>Parcelas</th><th className="n">Dívida</th><th className="n">Pago</th><th className="n">Saldo</th><th>Status</th><th /></tr></thead>
+            <thead>
+              <tr>
+                <th className={`sortable ${sortCol === "vencimento" ? "active" : ""}`} onClick={() => handleSort("vencimento")} title="Clique para ordenar por Vencimento">
+                  <span className="th-content">Vencimento <SortIcon col="vencimento" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th className={`sortable ${sortCol === "parcelas" ? "active" : ""}`} onClick={() => handleSort("parcelas")} title="Clique para ordenar por Parcelas">
+                  <span className="th-content">Parcelas <SortIcon col="parcelas" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th className={`sortable n ${sortCol === "divida_total" ? "active" : ""}`} onClick={() => handleSort("divida_total")} title="Clique para ordenar por Dívida">
+                  <span className="th-content">Dívida <SortIcon col="divida_total" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th className={`sortable n ${sortCol === "valor_pago" ? "active" : ""}`} onClick={() => handleSort("valor_pago")} title="Clique para ordenar por Valor Pago">
+                  <span className="th-content">Pago <SortIcon col="valor_pago" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th className={`sortable n ${sortCol === "saldo_devedor" ? "active" : ""}`} onClick={() => handleSort("saldo_devedor")} title="Clique para ordenar por Saldo Devedor">
+                  <span className="th-content">Saldo <SortIcon col="saldo_devedor" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th className={`sortable ${sortCol === "status" ? "active" : ""}`} onClick={() => handleSort("status")} title="Clique para ordenar por Status">
+                  <span className="th-content">Status <SortIcon col="status" sortCol={sortCol} sortAsc={sortAsc} /></span>
+                </th>
+                <th />
+              </tr>
+            </thead>
             <tbody>
-              {rows.map(r => (
+              {sortedRows.map(r => (
                 <tr key={r.id}>
                   <td><VencCell r={r} /></td>
                   <td className="mono">{r.parcelas || "—"}</td>
@@ -88,6 +147,8 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
   const [q, setQ] = useState("");
   const [qd, setQd] = useState("");
   const [abertos, setAbertos] = useState(true);
+  const [sortCol, setSortCol] = useState<string>("saldo");
+  const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [page, setPage] = useState(0);
   const [sel, setSel] = useState<Cli | null>(null);
   const [whats, setWhats] = useState<Cli | null>(null);
@@ -106,6 +167,34 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
   }, [qd, abertos, page]);
   useEffect(() => { load(); }, [load]);
 
+  const sortedList = useMemo(() => {
+    return [...list].sort((a, b) => {
+      let va: any = a[sortCol as keyof Cli];
+      let vb: any = b[sortCol as keyof Cli];
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === "string") {
+        const cmp = va.localeCompare(vb, "pt-BR", { sensitivity: "base" });
+        return sortAsc ? cmp : -cmp;
+      }
+      return sortAsc ? va - vb : vb - va;
+    });
+  }, [list, sortCol, sortAsc]);
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortAsc(a => !a);
+    } else {
+      setSortCol(col);
+      if (col === "divida" || col === "pago" || col === "saldo" || col === "vencido" || col === "qtd") {
+        setSortAsc(false);
+      } else {
+        setSortAsc(true);
+      }
+    }
+  };
+
   const pages = Math.max(1, Math.ceil(total / PS));
   return (
     <>
@@ -119,9 +208,37 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
       </div>
       <div className="wrap">
         <table>
-          <thead><tr><th>Cliente</th><th>Telefone</th><th className="n">Promissórias</th><th className="n">Total devido</th><th className="n">Total pago</th><th className="n">Saldo</th><th className="n">Vencido</th><th>Próx. vencimento</th><th /></tr></thead>
+          <thead>
+            <tr>
+              <th className={`sortable ${sortCol === "cliente" ? "active" : ""}`} onClick={() => handleSort("cliente")} title="Clique para ordenar por Cliente">
+                <span className="th-content">Cliente <SortIcon col="cliente" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "telefone" ? "active" : ""}`} onClick={() => handleSort("telefone")} title="Clique para ordenar por Telefone">
+                <span className="th-content">Telefone <SortIcon col="telefone" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "qtd" ? "active" : ""}`} onClick={() => handleSort("qtd")} title="Clique para ordenar por Promissórias">
+                <span className="th-content">Promissórias <SortIcon col="qtd" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "divida" ? "active" : ""}`} onClick={() => handleSort("divida")} title="Clique para ordenar por Total Devido">
+                <span className="th-content">Total devido <SortIcon col="divida" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "pago" ? "active" : ""}`} onClick={() => handleSort("pago")} title="Clique para ordenar por Total Pago">
+                <span className="th-content">Total pago <SortIcon col="pago" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "saldo" ? "active" : ""}`} onClick={() => handleSort("saldo")} title="Clique para ordenar por Saldo">
+                <span className="th-content">Saldo <SortIcon col="saldo" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "vencido" ? "active" : ""}`} onClick={() => handleSort("vencido")} title="Clique para ordenar por Valor Vencido">
+                <span className="th-content">Vencido <SortIcon col="vencido" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "proximo_venc" ? "active" : ""}`} onClick={() => handleSort("proximo_venc")} title="Clique para ordenar por Próximo Vencimento">
+                <span className="th-content">Próx. vencimento <SortIcon col="proximo_venc" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th />
+            </tr>
+          </thead>
           <tbody>
-            {list.map(c => (
+            {sortedList.map(c => (
               <tr key={c.cliente}>
                 <td className={c.vencido > 0 ? "s-NÃO" : c.saldo > 0 ? "s-PAGANDO" : "s-QUITADO"}>
                   <button

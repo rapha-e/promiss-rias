@@ -12,6 +12,8 @@ type Resumo = {
 };
 const PS = 50;
 
+import { SortIcon } from "./SortIcon";
+
 type VencFiltro = "" | "vencidas" | "d1" | "d7" | "d30";
 
 export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
@@ -23,7 +25,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [status, setStatus] = useState("");
   const [venc, setVenc] = useState<VencFiltro>("");
   const [year, setYear] = useState("");
-  const [sort, setSort] = useState("due");
+  const [sortCol, setSortCol] = useState("vencimento");
+  const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(0);
   const [baixa, setBaixa] = useState<Row | null>(null);
   const [logRow, setLogRow] = useState<Row | null>(null);
@@ -87,14 +90,17 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     else if (venc === "d7") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 7));
     else if (venc === "d30") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 30));
 
-    query = sort === "bal" ? query.order("saldo_devedor", { ascending: false })
-      : sort === "nome" ? query.order("cliente_nome")
-      : venc ? query.order("vencimento", { ascending: true })
-      : query.order("vencimento", { ascending: false, nullsFirst: false });
+    if (sortCol === "status") {
+      query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
+    } else if (sortCol === "vencimento") {
+      query = query.order("vencimento", { ascending: sortAsc, nullsFirst: false });
+    } else {
+      query = query.order(sortCol, { ascending: sortAsc });
+    }
     const { data, count: c, error } = await query.order("id").range(page * PS, page * PS + PS - 1);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, year, sort, page, venc]);
+  }, [qd, status, year, sortCol, sortAsc, page, venc]);
 
   useEffect(() => { loadResumo(); }, [loadResumo]);
   useEffect(() => { loadRows(); }, [loadRows]);
@@ -112,6 +118,35 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     ["FUNDO PERDIDO", "Fundo perdido", st?.["FUNDO PERDIDO"] ?? 0],
   ];
   const reset = () => setPage(0);
+
+  const toggleVenc = (f: VencFiltro) => {
+    if (venc === f) {
+      setVenc("");
+      setSortCol("vencimento");
+      setSortAsc(false);
+    } else {
+      setVenc(f);
+      setSortCol("vencimento");
+      setSortAsc(f !== "vencidas");
+    }
+    reset();
+  };
+
+  const handleSort = (col: string) => {
+    if (sortCol === col) {
+      setSortAsc(a => !a);
+    } else {
+      setSortCol(col);
+      if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor") {
+        setSortAsc(false);
+      } else if (col === "vencimento") {
+        setSortAsc(venc && venc !== "vencidas");
+      } else {
+        setSortAsc(true);
+      }
+    }
+    reset();
+  };
 
   return (
     <>
@@ -136,7 +171,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <button
             type="button"
             className={`alertbtn bad ${venc === "vencidas" ? "on" : ""}`}
-            onClick={() => { setVenc(venc === "vencidas" ? "" : "vencidas"); reset(); }}
+            onClick={() => toggleVenc("vencidas")}
             title="Filtrar promissórias vencidas"
           >
             <b>{resumo.vencidas_qtd.toLocaleString("pt-BR")} vencidas</b>
@@ -145,28 +180,28 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <button
             type="button"
             className={`alertbtn warn2 ${venc === "d1" ? "on" : ""}`}
-            onClick={() => { setVenc(venc === "d1" ? "" : "d1"); reset(); }}
-            title="Filtrar promissórias que vencem até amanhã (D+1)"
+            onClick={() => toggleVenc("d1")}
+            title="Filtrar promissórias que vencem em até 1 dia (amanhã)"
           >
-            <b>{(resumo.d1_qtd ?? 0).toLocaleString("pt-BR")} em D+1</b>
+            <b>{(resumo.d1_qtd ?? 0).toLocaleString("pt-BR")} em até 1 dia</b>
             <span>{money(resumo.d1_valor ?? 0)} projetado</span>
           </button>
           <button
             type="button"
             className={`alertbtn warn2 ${venc === "d7" ? "on" : ""}`}
-            onClick={() => { setVenc(venc === "d7" ? "" : "d7"); reset(); }}
-            title="Filtrar promissórias que vencem nos próximos 7 dias (D+7)"
+            onClick={() => toggleVenc("d7")}
+            title="Filtrar promissórias que vencem em até 7 dias"
           >
-            <b>{(resumo.d7_qtd ?? resumo.proximas_qtd ?? 0).toLocaleString("pt-BR")} em D+7</b>
+            <b>{(resumo.d7_qtd ?? resumo.proximas_qtd ?? 0).toLocaleString("pt-BR")} em até 7 dias</b>
             <span>{money(resumo.d7_valor ?? resumo.proximas_valor ?? 0)} projetado</span>
           </button>
           <button
             type="button"
             className={`alertbtn info ${venc === "d30" ? "on" : ""}`}
-            onClick={() => { setVenc(venc === "d30" ? "" : "d30"); reset(); }}
-            title="Filtrar promissórias que vencem nos próximos 30 dias (D+30)"
+            onClick={() => toggleVenc("d30")}
+            title="Filtrar promissórias que vencem em até 30 dias"
           >
-            <b>{(resumo.d30_qtd ?? 0).toLocaleString("pt-BR")} em D+30</b>
+            <b>{(resumo.d30_qtd ?? 0).toLocaleString("pt-BR")} em até 30 dias</b>
             <span>{money(resumo.d30_valor ?? 0)} projetado</span>
           </button>
         </div>
@@ -183,13 +218,55 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <option value="">Todos os anos</option>
           {(resumo?.anos ?? []).map(y => <option key={y}>{y}</option>)}
         </select>
-        <select value={sort} onChange={e => { setSort(e.target.value); reset(); }}>
-          <option value="due">Vencimento (recente)</option><option value="bal">Maior saldo</option><option value="nome">Cliente (A–Z)</option>
+        <select
+          value={`${sortCol}:${sortAsc ? "asc" : "desc"}`}
+          onChange={e => {
+            const [c, d] = e.target.value.split(":");
+            setSortCol(c);
+            setSortAsc(d === "asc");
+            reset();
+          }}
+        >
+          <option value="vencimento:desc">Vencimento (recente)</option>
+          <option value="vencimento:asc">Vencimento (mais antigo / próximo)</option>
+          <option value="saldo_devedor:desc">Maior saldo</option>
+          <option value="saldo_devedor:asc">Menor saldo</option>
+          <option value="divida_total:desc">Maior dívida</option>
+          <option value="valor_pago:desc">Maior valor pago</option>
+          <option value="cliente_nome:asc">Cliente (A–Z)</option>
+          <option value="cliente_nome:desc">Cliente (Z–A)</option>
+          <option value="telefone:asc">Telefone</option>
+          <option value="status:asc">Status</option>
         </select>
       </div>
       <div className="wrap">
         <table>
-          <thead><tr><th>Cliente</th><th>Telefone</th><th className="n">Dívida</th><th className="n">Pago</th><th className="n">Saldo</th><th>Vencimento</th><th>Status</th><th /></tr></thead>
+          <thead>
+            <tr>
+              <th className={`sortable ${sortCol === "cliente_nome" ? "active" : ""}`} onClick={() => handleSort("cliente_nome")} title="Clique para ordenar por Cliente">
+                <span className="th-content">Cliente <SortIcon col="cliente_nome" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "telefone" ? "active" : ""}`} onClick={() => handleSort("telefone")} title="Clique para ordenar por Telefone">
+                <span className="th-content">Telefone <SortIcon col="telefone" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "divida_total" ? "active" : ""}`} onClick={() => handleSort("divida_total")} title="Clique para ordenar por Dívida">
+                <span className="th-content">Dívida <SortIcon col="divida_total" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "valor_pago" ? "active" : ""}`} onClick={() => handleSort("valor_pago")} title="Clique para ordenar por Valor Pago">
+                <span className="th-content">Pago <SortIcon col="valor_pago" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable n ${sortCol === "saldo_devedor" ? "active" : ""}`} onClick={() => handleSort("saldo_devedor")} title="Clique para ordenar por Saldo Devedor">
+                <span className="th-content">Saldo <SortIcon col="saldo_devedor" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "vencimento" ? "active" : ""}`} onClick={() => handleSort("vencimento")} title="Clique para ordenar por Vencimento">
+                <span className="th-content">Vencimento <SortIcon col="vencimento" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th className={`sortable ${sortCol === "status" ? "active" : ""}`} onClick={() => handleSort("status")} title="Clique para ordenar por Status">
+                <span className="th-content">Status <SortIcon col="status" sortCol={sortCol} sortAsc={sortAsc} /></span>
+              </th>
+              <th />
+            </tr>
+          </thead>
           <tbody>
             {rows.map(r => (
               <tr key={r.id}>
