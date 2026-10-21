@@ -455,12 +455,20 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   )}
                   {r.valor_pago > 0 && (
                     <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                      Ver log
+                      Log
                     </button>
                   )}
-                  {!r.fundo_perdido && r.saldo_devedor > 0 && <button className="ed" onClick={() => setWhats(r)}>WhatsApp</button>}
-                  {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
-                  {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
+                  {!r.fundo_perdido && r.saldo_devedor > 0 && (
+                    <button className="ed" onClick={() => setWhats(r)} title="Cobrar por WhatsApp">
+                      Whats
+                    </button>
+                  )}
+                  {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
+                  {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
+                    <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                      {r.fundo_perdido ? "Desfazer" : "F. Perdido"}
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

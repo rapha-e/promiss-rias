@@ -291,7 +291,7 @@ export default function CobrancaWhatsApp() {
   };
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", paddingBottom: 40 }}>
+    <div style={{ width: "100%", paddingBottom: 40, boxSizing: "border-box" }}>
       <div className="head2 noprint" style={{ marginBottom: 14 }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 24, fontWeight: 700 }}>Cobrança Rápida via WhatsApp</h1>
