@@ -4,7 +4,7 @@ import { supabase } from "./supabase";
 import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
-  calcularScoreCliente,
+  calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
 } from "./lib";
 import type { Row, CreditScoreInfo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -611,6 +611,20 @@ export function BaixaDialog({
   onSaved: () => void;
 }) {
   const [valorStr, setValorStr] = useState(toBRL(row.saldo_devedor));
+  const [parcelaIdentificador, setParcelaIdentificador] = useState<string>(() => {
+    let logsCount = 0;
+    try {
+      const logs = JSON.parse(row.origem || "[]");
+      if (Array.isArray(logs)) logsCount = logs.length;
+    } catch {}
+    return extrairInfoParcelas(row.parcelas, row.divida_total, logsCount + 1).rotuloParcela;
+  });
+  const [valorTotalCompra, setValorTotalCompra] = useState<number>(() => {
+    return extrairInfoParcelas(row.parcelas, row.divida_total, 1).valorTotalCompra;
+  });
+  const [totalParcelasCarnê, setTotalParcelasCarnê] = useState<number>(() => {
+    return extrairInfoParcelas(row.parcelas, row.divida_total, 1).totalParcelas;
+  });
   const [outras, setOutras] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selecionadas, setSelecionadas] = useState<Set<number>>(new Set());
@@ -631,6 +645,17 @@ export function BaixaDialog({
   // Carregar outras promissórias em aberto do cliente
   useEffect(() => {
     let active = true;
+    let logsCount = 0;
+    try {
+      const logs = JSON.parse(row.origem || "[]");
+      if (Array.isArray(logs)) logsCount = logs.length;
+    } catch {}
+
+    const info = extrairInfoParcelas(row.parcelas, row.divida_total, logsCount + 1);
+    setParcelaIdentificador(info.rotuloParcela);
+    setValorTotalCompra(info.valorTotalCompra);
+    setTotalParcelasCarnê(info.totalParcelas);
+
     async function carregar() {
       setLoading(true);
       const { data, error } = await supabase
@@ -653,13 +678,16 @@ export function BaixaDialog({
       const lista = (data || []) as Row[];
       setOutras(lista);
 
-      // Prioriza selecionar promissórias do mesmo carnê (ex: "/3") com vencimento igual ou posterior
+      // Prioriza selecionar promissórias do mesmo carnê (ex: "/8") com vencimento igual ou posterior
       const m = row.parcelas?.match(/(\d+)\/(\d+)/);
       if (m) {
-        const totalCarnê = m[2];
+        const totalCarnê = parseInt(m[2], 10);
         const doMesmoCarnê = lista.filter(r => r.parcelas?.includes(`/${totalCarnê}`));
         if (doMesmoCarnê.length > 0) {
           setSelecionadas(new Set(doMesmoCarnê.map(r => r.id)));
+          const somaTotal = row.divida_total + doMesmoCarnê.reduce((acc, r) => acc + r.divida_total, 0);
+          setValorTotalCompra(somaTotal);
+          setTotalParcelasCarnê(totalCarnê);
           return;
         }
       }
@@ -837,8 +865,10 @@ export function BaixaDialog({
 
       const textoComprovante = mensagemComprovanteBaixa({
         nome: row.cliente_nome,
+        valorTotalCompra,
+        totalParcelas: totalParcelasCarnê,
         valorPago: V,
-        parcela: row.parcelas || "1X",
+        parcela: parcelaIdentificador || row.parcelas || "1X",
         valorRestante: valorRestanteFinal,
         dataPagamento: dtHora(agoraIso),
         proximasParcelas: proximasParcelasInfo,
@@ -1005,33 +1035,52 @@ export function BaixaDialog({
           <div style={{ fontSize: 16, fontWeight: 700 }}>{row.cliente_nome}</div>
           <div className="sub mono" style={{ marginTop: 2 }}>{row.telefone || "Sem telefone"}</div>
           <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 13, flexWrap: "wrap" }}>
-            <span>Parcela: <b>{row.parcelas || "1X"}</b></span>
+            <span>Compra total: <b>{formatarValorSemCifrao(valorTotalCompra)} em {totalParcelasCarnê}x</b></span>
+            <span>Parcela atual: <b>{parcelaIdentificador}</b></span>
             <span>Vencimento: <b>{dt(row.vencimento)}</b></span>
-            <span>Saldo original da parcela: <b className="mono">{money(row.saldo_devedor)}</b></span>
+            <span>Saldo em aberto: <b className="mono">{money(row.saldo_devedor)}</b></span>
           </div>
         </div>
 
-        <label style={{ marginTop: 4 }}>
-          <span style={{ fontWeight: 700, color: "var(--ink)", fontSize: 14 }}>
-            Valor recebido nesta baixa (R$)
-          </span>
-          <input
-            value={valorStr}
-            onChange={e => setValorStr(e.target.value)}
-            inputMode="decimal"
-            placeholder="0,00"
-            style={{ fontSize: 18, fontWeight: 600, padding: "10px 12px" }}
-            autoFocus
-            required
-          />
-          <span className="sub">
-            {isDiferente
-              ? V > row.saldo_devedor
-                ? `Valor recebido é R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} MAIOR que o valor calculado da parcela.`
-                : `Valor recebido é R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} MENOR que o valor calculado da parcela.`
-              : "Valor exato do vencimento calculado."}
-          </span>
-        </label>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 6 }}>
+          <label>
+            <span style={{ fontWeight: 700, color: "var(--ink)", fontSize: 13 }}>
+              Valor recebido nesta baixa (R$)
+            </span>
+            <input
+              value={valorStr}
+              onChange={e => setValorStr(e.target.value)}
+              inputMode="decimal"
+              placeholder="0,00"
+              style={{ fontSize: 17, fontWeight: 600, padding: "8px 12px" }}
+              autoFocus
+              required
+            />
+            <span className="sub">
+              {isDiferente
+                ? V > row.saldo_devedor
+                  ? `R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} maior que o saldo.`
+                  : `R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} menor que o saldo.`
+                : "Valor exato do saldo da parcela."}
+            </span>
+          </label>
+
+          <label>
+            <span style={{ fontWeight: 700, color: "var(--ink)", fontSize: 13 }}>
+              Identificação da parcela paga
+            </span>
+            <input
+              value={parcelaIdentificador}
+              onChange={e => setParcelaIdentificador(e.target.value)}
+              placeholder="Ex: Parcela 1/8"
+              style={{ fontSize: 15, fontWeight: 500, padding: "8px 12px" }}
+              required
+            />
+            <span className="sub">
+              Identifica a parcela paga no comprovante.
+            </span>
+          </label>
+        </div>
 
         {loading ? (
           <div className="sub" style={{ padding: 10 }}>Buscando outras promissórias do cliente…</div>
@@ -1359,10 +1408,14 @@ export function LogDialog({
                         style={{ fontSize: 11, padding: "2px 8px" }}
                         title="Enviar comprovante deste pagamento por WhatsApp"
                         onClick={() => {
+                          const numPagamento = Math.max(1, logs.length - idx);
+                          const info = extrairInfoParcelas(row.parcelas, row.divida_total, numPagamento);
                           const msg = mensagemComprovanteBaixa({
                             nome: row.cliente_nome,
+                            valorTotalCompra: info.valorTotalCompra,
+                            totalParcelas: info.totalParcelas,
                             valorPago: item.valor,
-                            parcela: row.parcelas || "1X",
+                            parcela: info.rotuloParcela,
                             valorRestante: row.saldo_devedor,
                             dataPagamento: dtHora(item.data),
                           });

@@ -140,24 +140,103 @@ export function mensagemCobranca(nome: string, itens: Item[]): string {
   return `Olá, ${primeiro}! Tudo bem?\n\nPassando para lembrar que consta em aberto ${abertos.length > 1 ? "os seguintes valores" : "o seguinte valor"}:\n${linhas.join("\n")}\n\nTotal: ${money(total)}\n\nSe já realizou o pagamento, por favor desconsidere esta mensagem. Qualquer dúvida, estou à disposição!`;
 }
 
+export function formatarValorSemCifrao(c: number): string {
+  return (c / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function extrairInfoParcelas(
+  parcelasStr: string | null | undefined,
+  dividaTotal: number,
+  numeroPagamento: number = 1
+): {
+  totalParcelas: number;
+  numeroParcela: number;
+  rotuloParcela: string;
+  valorTotalCompra: number;
+} {
+  const p = (parcelasStr || "").trim();
+
+  // Caso 1: formato "1/8" ou "Parcela 1/8"
+  const mBarra = p.match(/(\d+)\/(\d+)/);
+  if (mBarra) {
+    const atual = parseInt(mBarra[1], 10) || 1;
+    const total = parseInt(mBarra[2], 10) || 1;
+    return {
+      totalParcelas: total,
+      numeroParcela: atual,
+      rotuloParcela: `Parcela ${atual}/${total}`,
+      valorTotalCompra: dividaTotal,
+    };
+  }
+
+  // Caso 2: formato "8X" ou "8x" ou "8 X"
+  const mX = p.match(/^(\d+)\s*[xX]$/);
+  if (mX) {
+    const total = parseInt(mX[1], 10) || 1;
+    const atual = Math.min(total, Math.max(1, numeroPagamento));
+    return {
+      totalParcelas: total,
+      numeroParcela: atual,
+      rotuloParcela: `Parcela ${atual}/${total}`,
+      valorTotalCompra: dividaTotal,
+    };
+  }
+
+  // Caso 3: número isolado "8"
+  const mNum = p.match(/^(\d+)$/);
+  if (mNum) {
+    const total = parseInt(mNum[1], 10) || 1;
+    const atual = Math.min(total, Math.max(1, numeroPagamento));
+    return {
+      totalParcelas: total,
+      numeroParcela: atual,
+      rotuloParcela: `Parcela ${atual}/${total}`,
+      valorTotalCompra: dividaTotal,
+    };
+  }
+
+  // Caso padrão
+  return {
+    totalParcelas: 1,
+    numeroParcela: 1,
+    rotuloParcela: p ? (p.toLowerCase().startsWith("parcela") ? p : `Parcela ${p}`) : "Parcela 1/1",
+    valorTotalCompra: dividaTotal,
+  };
+}
+
 /**
  * Gera mensagem de comprovante para envio no WhatsApp após registro de baixa.
- * Contém: nome do pagador, valor pago, número da parcela, valor restante e data de pagamento.
+ * Contém: nome do pagador, valor total da compra em X vezes, valor pago, parcela paga, valor restante e data de pagamento.
  */
 export function mensagemComprovanteBaixa(params: {
   nome: string;
+  valorTotalCompra?: number;
+  totalParcelas?: number | string;
   valorPago: number;
   parcela: string;
   valorRestante: number;
   dataPagamento: string;
   proximasParcelas?: { parcela: string; valor: number; vencimento: string | null }[];
 }): string {
-  const { nome, valorPago, parcela, valorRestante, dataPagamento, proximasParcelas } = params;
+  const { nome, valorTotalCompra, totalParcelas, valorPago, parcela, valorRestante, dataPagamento, proximasParcelas } = params;
   const primeiroNome = titulo(nome.trim().split(/\s+/)[0] || "Cliente");
-  
-  const rotuloParcela = parcela
-    ? (parcela.toUpperCase().includes("X") || parcela.includes("/") ? `Parcela ${parcela}` : parcela)
-    : "Promissória";
+
+  // Rótulo da parcela paga, ex: "Parcela 1/8"
+  let rotuloParcela = parcela.trim();
+  if (rotuloParcela && !rotuloParcela.toLowerCase().startsWith("parcela")) {
+    rotuloParcela = `Parcela ${rotuloParcela}`;
+  }
+  if (!rotuloParcela) rotuloParcela = "Parcela Única";
+
+  // Linha do valor total da compra em X vezes, ex: "* *Valor total da compra:* 1.480,00 em 8x"
+  let linhaValorTotalCompra = "";
+  if (valorTotalCompra && valorTotalCompra > 0) {
+    const totalQtd = totalParcelas
+      ? String(totalParcelas).toLowerCase().replace(/[^0-9]/g, "")
+      : "";
+    const sufixoVezes = totalQtd ? ` em ${totalQtd}x` : "";
+    linhaValorTotalCompra = `* *Valor total da compra:* ${formatarValorSemCifrao(valorTotalCompra)}${sufixoVezes}\n`;
+  }
 
   let textoRestante = "";
   if (valorRestante <= 0) {
@@ -170,21 +249,22 @@ export function mensagemComprovanteBaixa(params: {
   if (proximasParcelas && proximasParcelas.length > 0 && valorRestante > 0) {
     const listagem = proximasParcelas.slice(0, 6).map(p => {
       const v = p.vencimento ? dt(p.vencimento) : "A definir";
-      return `• Parcela ${p.parcela}: ${money(p.valor)} (venc. ${v})`;
+      return `* Parcela ${p.parcela}: ${money(p.valor)} (venc. ${v})`;
     });
     if (proximasParcelas.length > 6) {
-      listagem.push(`• e mais ${proximasParcelas.length - 6} parcela(s)`);
+      listagem.push(`* e mais ${proximasParcelas.length - 6} parcela(s)`);
     }
     linhasProximas = `\n\n*Próximos vencimentos:*\n${listagem.join("\n")}`;
   }
 
-  return `*Comprovante de Pagamento — LeoÓticas.fin* 👓\n\n` +
+  return `*Comprovante de Pagamento — LeoÓticas.fin* 🧾\n\n` +
     `Olá, *${primeiroNome}*! Confirmamos o recebimento do seu pagamento com sucesso:\n\n` +
-    `• *Pagador:* ${nome}\n` +
-    `• *Valor pago:* ${money(valorPago)}\n` +
-    `• *Número da parcela:* ${rotuloParcela}\n` +
-    `• *Valor restante:* ${textoRestante}\n` +
-    `• *Data do pagamento:* ${dataPagamento}` +
+    `* *Pagador:* ${nome}\n` +
+    linhaValorTotalCompra +
+    `* *Valor pago:* ${money(valorPago)}\n` +
+    `* *Parcela:* ${rotuloParcela}\n` +
+    `* *Valor restante:* ${textoRestante}\n` +
+    `* *Data do pagamento:* ${dataPagamento}` +
     `${linhasProximas}\n\n` +
     `Agradecemos a sua preferência e confiança!\n` +
     `Qualquer dúvida, estamos à disposição.`;
