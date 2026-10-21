@@ -1916,14 +1916,12 @@ export function DesmembrarDialog({
     try {
       // 1. Atualizar a 1ª parcela mantendo o registro original (ID) para não quebrar referências
       const p1 = parcelas[0];
-      const statusP1 = deriveStatus(p1);
       const { error: err1 } = await supabase
         .from("promissorias")
         .update({
           parcelas: p1.parcelas,
           divida_total: p1.divida_total,
           valor_pago: p1.valor_pago,
-          status: statusP1,
           vencimento: p1.vencimento,
         })
         .eq("id", row.id);
@@ -1932,7 +1930,6 @@ export function DesmembrarDialog({
 
       // 2. Inserir as demais parcelas (2/N até N/N)
       const demais = parcelas.slice(1).map(p => {
-        const st = deriveStatus(p);
         return {
           cliente_nome: p.cliente_nome,
           telefone: p.telefone,
@@ -1940,7 +1937,6 @@ export function DesmembrarDialog({
           valor_pago: p.valor_pago,
           parcelas: p.parcelas,
           vencimento: p.vencimento,
-          status: st,
           origem: `DESMEMBRADO DO ID #${row.id} (${row.parcelas})`,
           fundo_perdido: false,
           fundo_perdido_motivo: null,
@@ -2150,14 +2146,12 @@ export function VarreduraParcelasDialog({
 
     // 1. Atualizar parcela 1
     const p1 = parcelas[0];
-    const statusP1 = deriveStatus(p1);
     const { error: err1 } = await supabase
       .from("promissorias")
       .update({
         parcelas: p1.parcelas,
         divida_total: p1.divida_total,
         valor_pago: p1.valor_pago,
-        status: statusP1,
         vencimento: p1.vencimento,
       })
       .eq("id", row.id);
@@ -2166,7 +2160,6 @@ export function VarreduraParcelasDialog({
 
     // 2. Inserir demais parcelas
     const demais = parcelas.slice(1).map(p => {
-      const st = deriveStatus(p);
       return {
         cliente_nome: p.cliente_nome,
         telefone: p.telefone,
@@ -2174,7 +2167,6 @@ export function VarreduraParcelasDialog({
         valor_pago: p.valor_pago,
         parcelas: p.parcelas,
         vencimento: p.vencimento,
-        status: st,
         origem: `DESMEMBRADO DO ID #${row.id} (${row.parcelas})`,
         fundo_perdido: false,
         fundo_perdido_motivo: null,
