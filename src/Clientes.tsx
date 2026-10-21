@@ -150,7 +150,7 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
   const [total, setTotal] = useState(0);
   const [q, setQ] = useState("");
   const [qd, setQd] = useState("");
-  const [abertos, setAbertos] = useState(true);
+  const [abertos, setAbertos] = useState(false);
   const [sortCol, setSortCol] = useState<string>("saldo");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
   const [page, setPage] = useState(0);

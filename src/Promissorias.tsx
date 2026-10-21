@@ -25,6 +25,41 @@ function ultimoDiaDoMes(yyyyMm: string): string {
   return d.toISOString().slice(0, 10);
 }
 
+function getScoreFromLinha(r: Row) {
+  if (r.fundo_perdido) {
+    return {
+      selo: "⛔ Fundo Perdido",
+      rotulo: "Fundo Perdido",
+      cor: "#64748b",
+      bgCor: "rgba(100, 116, 139, 0.15)",
+    };
+  }
+  const h = hoje();
+  const vencida = r.saldo_devedor > 0 && !!r.vencimento && r.vencimento < h;
+  if (vencida) {
+    return {
+      selo: "🔴 Risco Alto",
+      rotulo: "Risco Alto (Inadimplente)",
+      cor: "var(--bad)",
+      bgCor: "rgba(180, 35, 24, 0.12)",
+    };
+  }
+  if (r.saldo_devedor > 0) {
+    return {
+      selo: "🟡 Regular",
+      rotulo: "Regular / Em dia",
+      cor: "var(--warn)",
+      bgCor: "rgba(217, 119, 6, 0.12)",
+    };
+  }
+  return {
+    selo: "🟢 Diamante",
+    rotulo: "Cliente Diamante (Quitado)",
+    cor: "var(--brand)",
+    bgCor: "rgba(10, 124, 76, 0.12)",
+  };
+}
+
 export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
@@ -35,6 +70,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [venc, setVenc] = useState<VencFiltro>("");
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroClienteTemp, setFiltroClienteTemp] = useState("");
+  const [filtroScore, setFiltroScore] = useState<"" | "diamante" | "regular" | "risco_alto" | "fundo_perdido">("");
+  const [clientScores, setClientScores] = useState<Record<string, { selo: string; rotulo: string; cor: string; bgCor: string }>>({});
   const [filtroTelefone, setFiltroTelefone] = useState<"" | "com" | "sem">("");
   const [filtroDivida, setFiltroDivida] = useState("");
   const [filtroPago, setFiltroPago] = useState("");
@@ -119,6 +156,16 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     else if (filtroSaldo === "ate_500") query = query.gt("saldo_devedor", 0).lte("saldo_devedor", 500);
     else if (filtroSaldo === "mais_500") query = query.gt("saldo_devedor", 500);
 
+    if (filtroScore === "diamante") {
+      query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
+    } else if (filtroScore === "regular") {
+      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).or(`vencimento.gte.${h},vencimento.is.null`);
+    } else if (filtroScore === "risco_alto") {
+      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
+    } else if (filtroScore === "fundo_perdido") {
+      query = query.eq("fundo_perdido", true);
+    }
+
     if (venc === "vencidas") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
     else if (venc === "hoje") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).eq("vencimento", h);
     else if (venc === "proximos_7") {
@@ -138,7 +185,79 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const { data, count: c, error } = await query.order("id").range(page * PS, page * PS + PS - 1);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc, filtroCliente, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+
+  // Carrega a classificação real/completa dos clientes presentes na página
+  useEffect(() => {
+    if (rows.length === 0) {
+      setClientScores({});
+      return;
+    }
+    const uniqueNames = Array.from(new Set(rows.map(r => r.cliente_nome?.trim()).filter(Boolean))) as string[];
+    if (uniqueNames.length === 0) return;
+
+    let cancel = false;
+    supabase
+      .from("promissorias")
+      .select("cliente_nome, saldo_devedor, vencimento, fundo_perdido")
+      .in("cliente_nome", uniqueNames)
+      .then(({ data, error }) => {
+        if (cancel || error || !data) return;
+        const h = hoje();
+        const grouped: Record<string, { temFundoPerdido: boolean; temVencido: boolean; temAberto: boolean }> = {};
+
+        for (const row of data) {
+          const key = (row.cliente_nome || "").trim().toUpperCase();
+          if (!key) continue;
+          if (!grouped[key]) {
+            grouped[key] = { temFundoPerdido: false, temVencido: false, temAberto: false };
+          }
+          if (row.fundo_perdido) grouped[key].temFundoPerdido = true;
+          if ((row.saldo_devedor ?? 0) > 0) {
+            grouped[key].temAberto = true;
+            if (row.vencimento && row.vencimento < h) {
+              grouped[key].temVencido = true;
+            }
+          }
+        }
+
+        const res: Record<string, { selo: string; rotulo: string; cor: string; bgCor: string }> = {};
+        for (const [key, st] of Object.entries(grouped)) {
+          if (st.temFundoPerdido) {
+            res[key] = {
+              selo: "⛔ Fundo Perdido",
+              rotulo: "Fundo Perdido",
+              cor: "#64748b",
+              bgCor: "rgba(100, 116, 139, 0.15)",
+            };
+          } else if (st.temVencido) {
+            res[key] = {
+              selo: "🔴 Risco Alto",
+              rotulo: "Risco Alto (Inadimplente)",
+              cor: "var(--bad)",
+              bgCor: "rgba(180, 35, 24, 0.12)",
+            };
+          } else if (st.temAberto) {
+            res[key] = {
+              selo: "🟡 Regular",
+              rotulo: "Regular / Em dia",
+              cor: "var(--warn)",
+              bgCor: "rgba(217, 119, 6, 0.12)",
+            };
+          } else {
+            res[key] = {
+              selo: "🟢 Diamante",
+              rotulo: "Cliente Diamante (Quitado)",
+              cor: "var(--brand)",
+              bgCor: "rgba(10, 124, 76, 0.12)",
+            };
+          }
+        }
+        setClientScores(res);
+      });
+
+    return () => { cancel = true; };
+  }, [rows]);
 
   const loadProjecaoPeriodo = useCallback(async () => {
     if (!ini && !fim) {
@@ -225,11 +344,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     reset();
   };
 
-  const temFiltrosAtivos = Boolean(filtroCliente || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc);
+  const temFiltrosAtivos = Boolean(filtroCliente || filtroScore || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc);
 
   const limparTodosFiltros = () => {
     setFiltroCliente("");
     setFiltroClienteTemp("");
+    setFiltroScore("");
     setFiltroTelefone("");
     setFiltroDivida("");
     setFiltroPago("");
@@ -656,6 +776,16 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
               <button type="button" onClick={() => { setFiltroCliente(""); setFiltroClienteTemp(""); reset(); }} title="Remover filtro">✕</button>
             </span>
           )}
+          {filtroScore && (
+            <span className="filter-chip">
+              Score: {
+                filtroScore === "diamante" ? "🟢 Diamante" :
+                filtroScore === "regular" ? "🟡 Regular" :
+                filtroScore === "risco_alto" ? "🔴 Risco Alto" : "⛔ Fundo Perdido"
+              }
+              <button type="button" onClick={() => { setFiltroScore(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
           {filtroTelefone && (
             <span className="filter-chip">
               Telefone: {filtroTelefone === "com" ? "Com telefone" : "Sem telefone"}
@@ -721,11 +851,39 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 sortCol={sortCol}
                 sortAsc={sortAsc}
                 onSort={handleSort}
-                isFiltered={Boolean(filtroCliente)}
-                filterLabel={filtroCliente}
-                onClearFilter={() => { setFiltroCliente(""); setFiltroClienteTemp(""); reset(); }}
+                isFiltered={Boolean(filtroCliente || filtroScore)}
+                filterLabel={
+                  filtroCliente
+                    ? filtroCliente
+                    : filtroScore === "diamante"
+                    ? "🟢 Diamante"
+                    : filtroScore === "regular"
+                    ? "🟡 Regular"
+                    : filtroScore === "risco_alto"
+                    ? "🔴 Risco Alto"
+                    : filtroScore === "fundo_perdido"
+                    ? "⛔ Fundo Perdido"
+                    : ""
+                }
+                onClearFilter={() => {
+                  setFiltroCliente("");
+                  setFiltroClienteTemp("");
+                  setFiltroScore("");
+                  reset();
+                }}
+                options={[
+                  { label: "Todas as classificações", value: "", active: filtroScore === "" },
+                  { label: "🟢 Diamante (Quitados)", value: "diamante", active: filtroScore === "diamante" },
+                  { label: "🟡 Regular (Em dia)", value: "regular", active: filtroScore === "regular" },
+                  { label: "🔴 Risco Alto (Vencidos)", value: "risco_alto", active: filtroScore === "risco_alto" },
+                  { label: "⛔ Fundo Perdido", value: "fundo_perdido", active: filtroScore === "fundo_perdido" },
+                ]}
+                onSelectOption={val => {
+                  setFiltroScore(val as any);
+                  reset();
+                }}
                 customFilterContent={
-                  <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                  <div style={{ display: "flex", gap: 4, marginTop: 4, marginBottom: 8 }}>
                     <input
                       type="text"
                       placeholder="Filtrar por nome..."
@@ -887,19 +1045,38 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => (
-              <tr key={r.id}>
-                <td className={`s-${cls(deriveStatus(r))}`}>
-                  <button
-                    type="button"
-                    className="link-cli"
-                    title={`Ver todas as promissórias de ${r.cliente_nome}`}
-                    onClick={() => setFichaCliente({ cliente: r.cliente_nome, telefone: r.telefone })}
-                  >
-                    {r.cliente_nome}
-                  </button>
-                </td>
-                <td className="mono">{r.telefone || "—"}</td>
+            {rows.map(r => {
+              const cliKey = (r.cliente_nome || "").trim().toUpperCase();
+              const badge = clientScores[cliKey] || getScoreFromLinha(r);
+              return (
+                <tr key={r.id}>
+                  <td className={`s-${cls(deriveStatus(r))}`}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                      <button
+                        type="button"
+                        className="link-cli"
+                        title={`Ver todas as promissórias de ${r.cliente_nome}`}
+                        onClick={() => setFichaCliente({ cliente: r.cliente_nome, telefone: r.telefone })}
+                      >
+                        {r.cliente_nome}
+                      </button>
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 700,
+                          padding: "1px 6px",
+                          borderRadius: 99,
+                          background: badge.bgCor,
+                          color: badge.cor,
+                          whiteSpace: "nowrap",
+                        }}
+                        title={`Classificação de Crédito: ${badge.rotulo}`}
+                      >
+                        {badge.selo}
+                      </span>
+                    </div>
+                  </td>
+                  <td className="mono">{r.telefone || "—"}</td>
                 <td className="n">{money(r.divida_total)}</td>
                 <td className="n">{money(r.valor_pago)}</td>
                 <td className="n"><b>{money(r.saldo_devedor)}</b></td>
@@ -929,7 +1106,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   )}
                 </td>
               </tr>
-            ))}
+            );
+          })}
             {!rows.length && <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--mut)", padding: 30 }}>Nenhum registro encontrado.</td></tr>}
           </tbody>
         </table>
