@@ -263,7 +263,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     return Array.from({ length: qtd }, (_, idx) => {
       const num = idx + 1;
       const valor = base + (idx === 0 ? resto : 0);
-      const vencimento = d ? somaDias(d, idx * 30) : null;
+      const vencimento = d ? somaMeses(d, idx) : null;
       const rotulo = qtd === 1 ? "1X" : `${num}/${qtd}`;
 
       return {
@@ -649,7 +649,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               >
                 <div style={{ display: "flex", justifyContent: "space-between", marginBottom: G > 0 ? 4 : 8, fontSize: 12, fontWeight: 700, color: "var(--mut)" }}>
                   <span>PROMISSÓRIAS CALCULADAS ({qtd}x)</span>
-                  <span>A CADA 30 DIAS</span>
+                  <span>VENCIMENTO MENSAL (MESMO DIA)</span>
                 </div>
                 {G > 0 && (
                   <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8, fontSize: 11, color: "var(--mut)", background: "rgba(0,0,0,0.03)", padding: "4px 8px", borderRadius: 6 }}>
@@ -1923,7 +1923,6 @@ export function DesmembrarDialog({
           parcelas: p1.parcelas,
           divida_total: p1.divida_total,
           valor_pago: p1.valor_pago,
-          saldo_devedor: p1.saldo_devedor,
           status: statusP1,
           vencimento: p1.vencimento,
         })
@@ -1939,7 +1938,6 @@ export function DesmembrarDialog({
           telefone: p.telefone,
           divida_total: p.divida_total,
           valor_pago: p.valor_pago,
-          saldo_devedor: p.saldo_devedor,
           parcelas: p.parcelas,
           vencimento: p.vencimento,
           status: st,
@@ -2159,7 +2157,6 @@ export function VarreduraParcelasDialog({
         parcelas: p1.parcelas,
         divida_total: p1.divida_total,
         valor_pago: p1.valor_pago,
-        saldo_devedor: p1.saldo_devedor,
         status: statusP1,
         vencimento: p1.vencimento,
       })
@@ -2175,7 +2172,6 @@ export function VarreduraParcelasDialog({
         telefone: p.telefone,
         divida_total: p.divida_total,
         valor_pago: p.valor_pago,
-        saldo_devedor: p.saldo_devedor,
         parcelas: p.parcelas,
         vencimento: p.vencimento,
         status: st,

@@ -98,8 +98,18 @@ export const somaMeses = (dataIso: string | null | undefined, meses: number): st
   if (!dataIso) return null;
   const [ano, mes, dia] = dataIso.split("-").map(Number);
   if (!ano || !mes || !dia) return dataIso;
-  const d = new Date(Date.UTC(ano, mes - 1 + meses, dia));
-  return d.toISOString().slice(0, 10);
+
+  const totalMeses = ano * 12 + (mes - 1) + meses;
+  const targetAno = Math.floor(totalMeses / 12);
+  const targetMes = (totalMeses % 12) + 1; // 1 a 12
+
+  // Limitar ao último dia do mês alvo (ex.: 31 de janeiro -> 28/29 de fevereiro)
+  const ultimoDia = new Date(Date.UTC(targetAno, targetMes, 0)).getUTCDate();
+  const targetDia = Math.min(dia, ultimoDia);
+
+  const mm = String(targetMes).padStart(2, "0");
+  const dd = String(targetDia).padStart(2, "0");
+  return `${targetAno}-${mm}-${dd}`;
 };
 
 export function obterVencimentoEfetivo(r: {
