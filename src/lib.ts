@@ -319,6 +319,169 @@ export function extrairInfoParcelas(
   };
 }
 
+export interface CompraAtualInfo {
+  promissoriasCompra: Row[];
+  promissoriasOutras: Row[];
+  totalVendaAtual: number;
+  valorPagoVendaAtual: number;
+  saldoReceberVendaAtual: number;
+  totalParcelasCompra: number;
+  parcelasPagasCompra: number;
+  parcelasAbertasCompra: number;
+  totalOutrasQuitadas: number;
+  qtdOutrasQuitadas: number;
+}
+
+/**
+ * Identifica a referida compra atual (em aberto) de um cliente, separando-a estritamente
+ * das outras compras anteriores já quitadas no passado.
+ * Inclui todas as parcelas da compra (inclusive as que já foram quitadas nela).
+ */
+export function identificarCompraAtual(rows: Row[]): CompraAtualInfo {
+  if (!rows || rows.length === 0) {
+    return {
+      promissoriasCompra: [],
+      promissoriasOutras: [],
+      totalVendaAtual: 0,
+      valorPagoVendaAtual: 0,
+      saldoReceberVendaAtual: 0,
+      totalParcelasCompra: 0,
+      parcelasPagasCompra: 0,
+      parcelasAbertasCompra: 0,
+      totalOutrasQuitadas: 0,
+      qtdOutrasQuitadas: 0,
+    };
+  }
+
+  const abertas = rows.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) > 0);
+
+  // Se não tem nenhuma promissória aberta, o cliente está 100% quitado
+  if (abertas.length === 0) {
+    const quitadas = rows.filter(r => !r.fundo_perdido);
+    const totDivida = quitadas.reduce((s, r) => s + (r.divida_total ?? 0), 0);
+    const totPago = quitadas.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+    return {
+      promissoriasCompra: rows,
+      promissoriasOutras: [],
+      totalVendaAtual: totDivida,
+      valorPagoVendaAtual: totPago,
+      saldoReceberVendaAtual: 0,
+      totalParcelasCompra: rows.length,
+      parcelasPagasCompra: rows.length,
+      parcelasAbertasCompra: 0,
+      totalOutrasQuitadas: 0,
+      qtdOutrasQuitadas: 0,
+    };
+  }
+
+  // Identificar carnês desmembrados em aberto (formato X/Y)
+  const carnesAbertos = new Map<number, { minNum: number; maxNum: number; valorParcela: number; idsAbertos: Set<number> }>();
+
+  for (const r of abertas) {
+    const m = (r.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+    if (m) {
+      const num = parseInt(m[1], 10);
+      const denom = parseInt(m[2], 10);
+      if (!carnesAbertos.has(denom)) {
+        carnesAbertos.set(denom, {
+          minNum: num,
+          maxNum: num,
+          valorParcela: r.divida_total,
+          idsAbertos: new Set([r.id]),
+        });
+      } else {
+        const c = carnesAbertos.get(denom)!;
+        if (num < c.minNum) c.minNum = num;
+        if (num > c.maxNum) c.maxNum = num;
+        c.idsAbertos.add(r.id);
+      }
+    }
+  }
+
+  const compraIds = new Set<number>();
+  for (const r of abertas) {
+    compraIds.add(r.id);
+  }
+
+  // Buscar parcelas já quitadas que pertencem ao mesmo carnê em aberto
+  for (const [denom, carne] of carnesAbertos.entries()) {
+    for (let k = 1; k <= denom; k++) {
+      const jaAberto = Array.from(carne.idsAbertos).some(id => {
+        const rowObj = rows.find(x => x.id === id);
+        return rowObj?.parcelas?.startsWith(`${k}/`);
+      });
+      if (jaAberto) continue;
+
+      const candidatas = rows.filter(r => {
+        if (r.fundo_perdido || (r.saldo_devedor ?? 0) > 0) return false;
+        const m = (r.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+        return m && parseInt(m[1], 10) === k && parseInt(m[2], 10) === denom;
+      });
+
+      if (candidatas.length > 0) {
+        candidatas.sort((a, b) => {
+          const diffA = Math.abs(a.divida_total - carne.valorParcela);
+          const diffB = Math.abs(b.divida_total - carne.valorParcela);
+          if (diffA !== diffB) return diffA - diffB;
+          return b.id - a.id;
+        });
+        compraIds.add(candidatas[0].id);
+      }
+    }
+  }
+
+  const promissoriasCompra: Row[] = [];
+  const promissoriasOutras: Row[] = [];
+
+  for (const r of rows) {
+    if (compraIds.has(r.id)) {
+      promissoriasCompra.push(r);
+    } else {
+      promissoriasOutras.push(r);
+    }
+  }
+
+  const totalVendaAtual = promissoriasCompra.reduce((s, r) => s + (r.divida_total ?? 0), 0);
+  const valorPagoVendaAtual = promissoriasCompra.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+  const saldoReceberVendaAtual = promissoriasCompra.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
+
+  let totalParcelasCompra = 0;
+  if (carnesAbertos.size > 0) {
+    totalParcelasCompra = Array.from(carnesAbertos.keys()).reduce((s, d) => s + d, 0);
+    const avulsas = promissoriasCompra.filter(r => !r.parcelas?.match(/^\d+\/\d+$/));
+    for (const av of avulsas) {
+      const info = extrairInfoParcelas(av.parcelas, av.divida_total);
+      totalParcelasCompra += info.totalParcelas;
+    }
+  } else {
+    for (const r of promissoriasCompra) {
+      const info = extrairInfoParcelas(r.parcelas, r.divida_total);
+      totalParcelasCompra += info.totalParcelas;
+    }
+  }
+
+  const parcelasPagasCompra = promissoriasCompra.filter(r => (r.saldo_devedor ?? 0) <= 0).length;
+  const parcelasAbertasCompra = promissoriasCompra.filter(r => (r.saldo_devedor ?? 0) > 0).length;
+
+  const totalOutrasQuitadas = promissoriasOutras
+    .filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) <= 0)
+    .reduce((s, r) => s + (r.divida_total ?? 0), 0);
+  const qtdOutrasQuitadas = promissoriasOutras.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) <= 0).length;
+
+  return {
+    promissoriasCompra,
+    promissoriasOutras,
+    totalVendaAtual,
+    valorPagoVendaAtual,
+    saldoReceberVendaAtual,
+    totalParcelasCompra: Math.max(promissoriasCompra.length, totalParcelasCompra),
+    parcelasPagasCompra,
+    parcelasAbertasCompra,
+    totalOutrasQuitadas,
+    qtdOutrasQuitadas,
+  };
+}
+
 /**
  * Gera mensagem de comprovante para envio no WhatsApp após registro de baixa.
  * Contém: nome do pagador, valor total da compra em X vezes, valor pago, parcela paga, valor restante e data de pagamento.

@@ -6,6 +6,7 @@ import {
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses,
+  identificarCompraAtual,
 } from "./lib";
 import type { Row, CreditScoreInfo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -843,21 +844,24 @@ export function FichaCliente({
 
   const tel = telefone || rows.find(r => r.telefone)?.telefone || "";
   const abertos = rows.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
-  const tot = rows.reduce(
-    (a, r) => ({
-      d: a.d + r.divida_total,
-      p: a.p + r.valor_pago,
-      s: a.s + (r.fundo_perdido ? 0 : r.saldo_devedor),
-      f: a.f + (r.fundo_perdido ? r.saldo_devedor : 0),
-    }),
-    { d: 0, p: 0, s: 0, f: 0 }
-  );
+  const compraInfo = useMemo(() => identificarCompraAtual(rows), [rows]);
+  const [filtroAba, setFiltroAba] = useState<"compra_atual" | "quitadas" | "todas">("compra_atual");
+
+  const rowsFiltradas = useMemo(() => {
+    if (filtroAba === "compra_atual") {
+      return compraInfo.promissoriasCompra.length > 0 ? compraInfo.promissoriasCompra : rows;
+    }
+    if (filtroAba === "quitadas") {
+      return compraInfo.promissoriasOutras.length > 0 ? compraInfo.promissoriasOutras : [];
+    }
+    return rows;
+  }, [filtroAba, compraInfo, rows]);
 
   const [sortCol, setSortCol] = useState<string>("vencimento");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
 
   const sortedRows = useMemo(() => {
-    return [...rows].sort((a, b) => {
+    return [...rowsFiltradas].sort((a, b) => {
       let va: any = a[sortCol as keyof Row];
       let vb: any = b[sortCol as keyof Row];
       if (sortCol === "status") {
@@ -873,7 +877,7 @@ export function FichaCliente({
       }
       return sortAsc ? va - vb : vb - va;
     });
-  }, [rows, sortCol, sortAsc]);
+  }, [rowsFiltradas, sortCol, sortAsc]);
 
   const handleSort = (col: string) => {
     if (sortCol === col) {
@@ -926,10 +930,96 @@ export function FichaCliente({
         </div>
         {err && <div className="err">{err}</div>}
         <div className="kpis" style={{ margin: 0 }}>
-          <div className="card hl"><small>Saldo a receber</small><b>{money(tot.s)}</b></div>
-          <div className="card"><small>Total de venda</small><b>{money(tot.d)}</b></div>
-          <div className="card"><small>Total pago</small><b>{money(tot.p)}</b></div>
-          <div className="card"><small>Promissórias</small><b>{rows.length}</b>{tot.f > 0 && <span className="ksub">Fundo perdido: {money(tot.f)}</span>}</div>
+          <div className="card hl">
+            <small>SALDO A RECEBER</small>
+            <b>{money(compraInfo.saldoReceberVendaAtual)}</b>
+          </div>
+          <div className="card">
+            <small>TOTAL DA VENDA ATUAL</small>
+            <b>{money(compraInfo.totalVendaAtual)}</b>
+          </div>
+          <div className="card">
+            <small>VALOR PAGO (VENDA ATUAL)</small>
+            <b>{money(compraInfo.valorPagoVendaAtual)}</b>
+          </div>
+          <div className="card">
+            <small>PARCELAS DA VENDA ATUAL</small>
+            <b>{compraInfo.totalParcelasCompra}</b>
+            {compraInfo.totalOutrasQuitadas > 0 ? (
+              <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
+                ✓ {money(compraInfo.totalOutrasQuitadas)} quitados em compras anteriores
+              </span>
+            ) : compraInfo.parcelasPagasCompra > 0 ? (
+              <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
+                ✓ {compraInfo.parcelasPagasCompra} pagas · {compraInfo.parcelasAbertasCompra} em aberto
+              </span>
+            ) : null}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 2, marginBottom: -4 }}>
+          <button
+            type="button"
+            onClick={() => setFiltroAba("compra_atual")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 99,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: filtroAba === "compra_atual" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+              background: filtroAba === "compra_atual" ? "var(--brand)" : "var(--panel)",
+              color: filtroAba === "compra_atual" ? "#fff" : "var(--ink)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              transition: "all 0.15s ease",
+            }}
+          >
+            <span>🟢</span> Venda Atual / Em Aberto ({compraInfo.parcelasAbertasCompra} {compraInfo.parcelasAbertasCompra === 1 ? "parcela" : "parcelas"})
+          </button>
+          {compraInfo.qtdOutrasQuitadas > 0 && (
+            <button
+              type="button"
+              onClick={() => setFiltroAba("quitadas")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 99,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: filtroAba === "quitadas" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+                background: filtroAba === "quitadas" ? "var(--brand)" : "var(--panel)",
+                color: filtroAba === "quitadas" ? "#fff" : "var(--ink)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>✓</span> Vendas Já Quitadas ({compraInfo.qtdOutrasQuitadas})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setFiltroAba("todas")}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 99,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: filtroAba === "todas" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+              background: filtroAba === "todas" ? "var(--brand)" : "var(--panel)",
+              color: filtroAba === "todas" ? "#fff" : "var(--ink)",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              transition: "all 0.15s ease",
+            }}
+          >
+            Todas as Promissórias ({rows.length})
+          </button>
         </div>
         <div className="wrap">
           <table style={{ width: "100%" }}>
