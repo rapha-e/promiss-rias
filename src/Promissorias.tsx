@@ -1,20 +1,20 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
-import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, somaDias } from "./lib";
+import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money } from "./lib";
 import type { Row, Status } from "./lib";
 import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 
 type Resumo = {
   total: number; divida: number; pago: number; saldo: number; perdido: number; status: Record<Status, number>;
   vencidas_qtd: number; vencidas_valor: number; proximas_qtd: number; proximas_valor: number;
-  d1_qtd?: number; d1_valor?: number; d7_qtd?: number; d7_valor?: number; d30_qtd?: number; d30_valor?: number;
+  hoje_qtd?: number; hoje_valor?: number;
   anos: number[];
 };
 const PS = 50;
 
 import { SortIcon } from "./SortIcon";
 
-type VencFiltro = "" | "vencidas" | "d1" | "d7" | "d30";
+type VencFiltro = "" | "vencidas" | "hoje";
 
 const ANOS_DISPONIVEIS = Array.from({ length: 15 }, (_, i) => 2020 + i);
 
@@ -61,27 +61,17 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     if (error) { setError(error.message); return; }
     const res = { ...(data as Resumo) };
     const h = hoje();
-    if (res.d1_qtd === undefined) {
-      const [q1, q7, q30, qAVencer, qNaoPagou] = await Promise.all([
-        supabase.from("promissorias").select("saldo_devedor").eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 1)),
-        supabase.from("promissorias").select("saldo_devedor").eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 7)),
-        supabase.from("promissorias").select("saldo_devedor").eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 30)),
-        supabase.from("promissorias").select("id", { count: "exact", head: true }).eq("fundo_perdido", false).eq("valor_pago", 0).or(`vencimento.gte.${h},vencimento.is.null`),
-        supabase.from("promissorias").select("id", { count: "exact", head: true }).eq("fundo_perdido", false).eq("valor_pago", 0).lt("vencimento", h),
-      ]);
-      const d1List = q1.data ?? [];
-      const d7List = q7.data ?? [];
-      const d30List = q30.data ?? [];
-      res.d1_qtd = d1List.length;
-      res.d1_valor = d1List.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
-      res.d7_qtd = d7List.length;
-      res.d7_valor = d7List.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
-      res.d30_qtd = d30List.length;
-      res.d30_valor = d30List.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
-      if (res.status) {
-        res.status["A VENCER"] = qAVencer.count ?? 0;
-        res.status["NÃO PAGOU"] = qNaoPagou.count ?? 0;
-      }
+    const [qHoje, qAVencer, qNaoPagou] = await Promise.all([
+      supabase.from("promissorias").select("saldo_devedor").eq("fundo_perdido", false).gt("saldo_devedor", 0).eq("vencimento", h),
+      supabase.from("promissorias").select("id", { count: "exact", head: true }).eq("fundo_perdido", false).eq("valor_pago", 0).or(`vencimento.gte.${h},vencimento.is.null`),
+      supabase.from("promissorias").select("id", { count: "exact", head: true }).eq("fundo_perdido", false).eq("valor_pago", 0).lt("vencimento", h),
+    ]);
+    const hojeList = qHoje.data ?? [];
+    res.hoje_qtd = hojeList.length;
+    res.hoje_valor = hojeList.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
+    if (res.status) {
+      res.status["A VENCER"] = qAVencer.count ?? 0;
+      res.status["NÃO PAGOU"] = qNaoPagou.count ?? 0;
     }
     setResumo(res);
   }, []);
@@ -102,9 +92,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     if (fim) query = query.lte("vencimento", fim);
 
     if (venc === "vencidas") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
-    else if (venc === "d1") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 1));
-    else if (venc === "d7") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 7));
-    else if (venc === "d30") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", somaDias(h, 30));
+    else if (venc === "hoje") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).eq("vencimento", h);
 
     if (sortCol === "status") {
       query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
@@ -231,31 +219,41 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           </button>
           <button
             type="button"
-            className={`alertbtn warn2 ${venc === "d1" ? "on" : ""}`}
-            onClick={() => toggleVenc("d1")}
-            title="Filtrar promissórias que vencem em até 1 dia (amanhã)"
+            className={`alertbtn warn2 ${venc === "hoje" ? "on" : ""}`}
+            onClick={() => toggleVenc("hoje")}
+            title="Filtrar promissórias que vencem hoje"
           >
-            <b>{(resumo.d1_qtd ?? 0).toLocaleString("pt-BR")} em até 1 dia</b>
-            <span>{money(resumo.d1_valor ?? 0)} projetado</span>
+            <b>{(resumo.hoje_qtd ?? 0).toLocaleString("pt-BR")} hoje</b>
+            <span>{money(resumo.hoje_valor ?? 0)} projetado</span>
           </button>
-          <button
-            type="button"
-            className={`alertbtn warn2 ${venc === "d7" ? "on" : ""}`}
-            onClick={() => toggleVenc("d7")}
-            title="Filtrar promissórias que vencem em até 7 dias"
-          >
-            <b>{(resumo.d7_qtd ?? resumo.proximas_qtd ?? 0).toLocaleString("pt-BR")} em até 7 dias</b>
-            <span>{money(resumo.d7_valor ?? resumo.proximas_valor ?? 0)} projetado</span>
-          </button>
-          <button
-            type="button"
-            className={`alertbtn info ${venc === "d30" ? "on" : ""}`}
-            onClick={() => toggleVenc("d30")}
-            title="Filtrar promissórias que vencem em até 30 dias"
-          >
-            <b>{(resumo.d30_qtd ?? 0).toLocaleString("pt-BR")} em até 30 dias</b>
-            <span>{money(resumo.d30_valor ?? 0)} projetado</span>
-          </button>
+
+          <div className={`projecao-alert-card ${projecaoPeriodo !== null ? "active" : "empty"}`}>
+            <div className="projecao-alert-left">
+              <span className="projecao-alert-tag">Valor projetado no período</span>
+              <div className="projecao-alert-main">
+                <span className="projecao-alert-valor">
+                  {projecaoPeriodo !== null ? money(projecaoPeriodo.valor) : "R$ —"}
+                </span>
+                <span className="projecao-alert-desc">
+                  {projecaoPeriodo !== null ? "projetado a receber" : "selecione um período abaixo"}
+                </span>
+              </div>
+            </div>
+            <div className="projecao-alert-right">
+              {projecaoPeriodo !== null ? (
+                <>
+                  <span className="projecao-alert-qtd">
+                    <b>{projecaoPeriodo.qtd.toLocaleString("pt-BR")}</b> promissória{projecaoPeriodo.qtd !== 1 ? "s" : ""} com saldo
+                  </span>
+                  <span className="projecao-alert-periodo">
+                    {ini && fim ? `Vencimentos de ${dt(ini)} até ${dt(fim)}` : ini ? `Vencimentos a partir de ${dt(ini)}` : `Vencimentos até ${dt(fim)}`}
+                  </span>
+                </>
+              ) : (
+                <span className="projecao-alert-periodo muted">Nenhum período selecionado</span>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
@@ -401,24 +399,6 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <option value="status:asc">Status</option>
         </select>
       </div>
-
-      {projecaoPeriodo !== null && (
-        <div className="projecao-box">
-          <div className="projecao-box-left">
-            <span className="projecao-box-tag">Valor projetado no período</span>
-            <div className="projecao-box-main">
-              <span className="projecao-box-valor">{money(projecaoPeriodo.valor)}</span>
-              <span className="projecao-box-desc">projetado a receber</span>
-            </div>
-          </div>
-          <div className="projecao-box-right">
-            <span><b>{projecaoPeriodo.qtd.toLocaleString("pt-BR")}</b> promissória{projecaoPeriodo.qtd !== 1 ? "s" : ""} com saldo em aberto</span>
-            <span className="projecao-box-periodo">
-              {ini && fim ? `Vencimentos de ${dt(ini)} até ${dt(fim)}` : ini ? `Vencimentos a partir de ${dt(ini)}` : `Vencimentos até ${dt(fim)}`}
-            </span>
-          </div>
-        </div>
-      )}
 
       <div className="wrap">
         <table>
