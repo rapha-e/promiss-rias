@@ -959,7 +959,7 @@ export function FichaCliente({
             <tbody>
               {sortedRows.map(r => {
                 const info = extrairInfoParcelas(r.parcelas);
-                const podeDesmembrar = isAdmin && info.ehCarnetAgrupado && info.totalParcelas > 1 && !r.fundo_perdido;
+                const podeDesmembrar = isAdmin && r.saldo_devedor > 0 && info.ehCarnetAgrupado && info.totalParcelas > 1 && !r.fundo_perdido;
                 return (
                   <tr key={r.id}>
                     <td><VencCell r={r} /></td>

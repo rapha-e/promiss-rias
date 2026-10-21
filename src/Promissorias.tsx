@@ -1129,13 +1129,14 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 <td className="n">{money(r.valor_pago)}</td>
                 <td className="n"><b>{money(r.saldo_devedor)}</b></td>
                 <td><VencCell r={r} /></td>
-                       <td className="acts">
+                <td><StatusPill r={r} />{r.fundo_perdido && r.fundo_perdido_motivo && <div className="sub" title={r.fundo_perdido_motivo}>{r.fundo_perdido_motivo.slice(0, 28)}</div>}</td>
+                <td className="acts">
                     {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
                       <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
                         Baixar
                       </button>
                     )}
-                    {isAdmin && extrairInfoParcelas(r.parcelas).ehCarnetAgrupado && extrairInfoParcelas(r.parcelas).totalParcelas > 1 && !r.fundo_perdido && (
+                    {isAdmin && r.saldo_devedor > 0 && extrairInfoParcelas(r.parcelas).ehCarnetAgrupado && extrairInfoParcelas(r.parcelas).totalParcelas > 1 && !r.fundo_perdido && (
                       <button
                         className="ed"
                         onClick={() => setDesmembrarRow(r)}
