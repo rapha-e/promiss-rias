@@ -18,7 +18,14 @@ export const LBL: Record<Status, string> = {
   "FUNDO PERDIDO": "Fundo perdido"
 };
 export const cls = (s: Status) => (s === "A VENCER" ? "VENCER" : s.split(" ")[0]);
-export const dt = (d: string | null) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}/${d.slice(0, 4)}` : "Sem vencimento");
+export const dt = (d: string | null | undefined) => {
+  if (!d) return "Sem vencimento";
+  const str = String(d).trim();
+  if (str.length === 7) return `${str.slice(5, 7)}/${str.slice(0, 4)}`;
+  if (str.length === 4) return str;
+  if (str.length >= 10) return `${str.slice(8, 10)}/${str.slice(5, 7)}/${str.slice(0, 4)}`;
+  return str;
+};
 export const dtHora = (iso?: string | null) => {
   if (!iso) return "—";
   try {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
-import { LBL, cls, deriveStatus, hoje, mensagemCobranca, money, somaDias } from "./lib";
+import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, somaDias } from "./lib";
 import type { Row, Status } from "./lib";
 import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 
@@ -192,7 +192,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor") {
         setSortAsc(false);
       } else if (col === "vencimento") {
-        setSortAsc(venc && venc !== "vencidas");
+        setSortAsc(Boolean(venc && venc !== "vencidas"));
       } else {
         setSortAsc(true);
       }
