@@ -52,13 +52,15 @@ export function deriveStatus(r: {
   valor_pago: number;
   saldo_devedor?: number;
   vencimento?: string | null;
+  parcelas?: string | null;
 }): Status {
   if (r.fundo_perdido) return "FUNDO PERDIDO";
   const saldo = r.saldo_devedor ?? Math.max(r.divida_total - r.valor_pago, 0);
   if (saldo <= 0) return "QUITADO";
   if (r.valor_pago > 0) return "PAGANDO";
   const h = hoje();
-  if (r.vencimento && r.vencimento < h) return "NÃO PAGOU";
+  const vencReal = obterVencimentoEfetivo(r) || r.vencimento;
+  if (vencReal && vencReal < h) return "NÃO PAGOU";
   return "A VENCER";
 }
 
@@ -92,10 +94,108 @@ const utc = (s: string) => Date.UTC(+s.slice(0, 4), +s.slice(5, 7) - 1, +s.slice
 export const diffDias = (a: string, b: string) => Math.round((utc(a) - utc(b)) / 86400000);
 export const somaDias = (s: string, n: number) => new Date(utc(s) + n * 86400000).toISOString().slice(0, 10);
 
+export const somaMeses = (dataIso: string | null | undefined, meses: number): string | null => {
+  if (!dataIso) return null;
+  const [ano, mes, dia] = dataIso.split("-").map(Number);
+  if (!ano || !mes || !dia) return dataIso;
+  const d = new Date(Date.UTC(ano, mes - 1 + meses, dia));
+  return d.toISOString().slice(0, 10);
+};
+
+export function obterVencimentoEfetivo(r: {
+  parcelas?: string | null;
+  divida_total?: number;
+  valor_pago?: number;
+  saldo_devedor?: number;
+  vencimento?: string | null;
+  fundo_perdido?: boolean;
+}): string | null {
+  if (!r.vencimento) return null;
+  const saldo = r.saldo_devedor ?? Math.max(0, (r.divida_total ?? 0) - (r.valor_pago ?? 0));
+  if (saldo <= 0) return r.vencimento;
+
+  const p = (r.parcelas || "").trim().toUpperCase();
+  const m = p.match(/^(\d+)\s*[xX]$/);
+  if (!m) return r.vencimento;
+
+  const totalParcelas = parseInt(m[1], 10);
+  if (totalParcelas <= 1 || !r.divida_total || r.divida_total <= 0) return r.vencimento;
+
+  const valorPago = r.valor_pago || 0;
+  if (valorPago <= 0) return r.vencimento;
+
+  const valorParcela = r.divida_total / totalParcelas;
+  let parcelasPagas = 0;
+  for (let k = 1; k <= totalParcelas; k++) {
+    if (valorPago >= Math.floor(k * valorParcela * 0.95)) {
+      parcelasPagas = k;
+    } else {
+      break;
+    }
+  }
+
+  if (parcelasPagas === 0) return r.vencimento;
+  return somaMeses(r.vencimento, parcelasPagas);
+}
+
+export function gerarParcelasDesmembradas(r: Row): {
+  cliente_nome: string;
+  telefone: string;
+  divida_total: number;
+  parcelas: string;
+  valor_pago: number;
+  saldo_devedor: number;
+  vencimento: string | null;
+  fundo_perdido: boolean;
+  origem?: string;
+}[] {
+  const p = (r.parcelas || "").trim().toUpperCase();
+  const m = p.match(/^(\d+)\s*[xX]$/);
+  if (!m) return [];
+
+  const total = parseInt(m[1], 10);
+  if (total <= 1) return [];
+
+  const base = Math.floor(r.divida_total / total);
+  const resto = r.divida_total % total;
+  let pagoRestante = r.valor_pago || 0;
+
+  const resultado = [];
+  for (let i = 1; i <= total; i++) {
+    const valorParcela = base + (i === 1 ? resto : 0);
+    const pagoNesta = Math.min(valorParcela, Math.max(0, pagoRestante));
+    pagoRestante -= pagoNesta;
+    const saldo = valorParcela - pagoNesta;
+    const venc = somaMeses(r.vencimento, i - 1);
+
+    resultado.push({
+      cliente_nome: r.cliente_nome,
+      telefone: r.telefone,
+      divida_total: valorParcela,
+      parcelas: `${i}/${total}`,
+      valor_pago: pagoNesta,
+      saldo_devedor: saldo,
+      vencimento: venc,
+      fundo_perdido: r.fundo_perdido || false,
+      origem: r.origem,
+    });
+  }
+
+  return resultado;
+}
+
 export type Alerta = { tipo: "vencida" | "proxima" | null; dias: number };
-export function alerta(r: { vencimento: string | null; saldo_devedor: number; fundo_perdido: boolean }): Alerta {
+export function alerta(r: {
+  vencimento: string | null;
+  saldo_devedor: number;
+  fundo_perdido: boolean;
+  parcelas?: string | null;
+  divida_total?: number;
+  valor_pago?: number;
+}): Alerta {
   if (!r.vencimento || r.fundo_perdido || r.saldo_devedor <= 0) return { tipo: null, dias: 0 };
-  const d = diffDias(hoje(), r.vencimento);
+  const vencReal = obterVencimentoEfetivo(r) || r.vencimento;
+  const d = diffDias(hoje(), vencReal);
   if (d > 0) return { tipo: "vencida", dias: d };
   if (d >= -7) return { tipo: "proxima", dias: -d };
   return { tipo: null, dias: 0 };
@@ -146,13 +246,14 @@ export function formatarValorSemCifrao(c: number): string {
 
 export function extrairInfoParcelas(
   parcelasStr: string | null | undefined,
-  dividaTotal: number,
+  dividaTotal: number = 0,
   numeroPagamento: number = 1
 ): {
   totalParcelas: number;
   numeroParcela: number;
   rotuloParcela: string;
   valorTotalCompra: number;
+  ehCarnetAgrupado: boolean;
 } {
   const p = (parcelasStr || "").trim();
 
@@ -166,6 +267,7 @@ export function extrairInfoParcelas(
       numeroParcela: atual,
       rotuloParcela: `Parcela ${atual}/${total}`,
       valorTotalCompra: dividaTotal,
+      ehCarnetAgrupado: false,
     };
   }
 
@@ -179,6 +281,7 @@ export function extrairInfoParcelas(
       numeroParcela: atual,
       rotuloParcela: `Parcela ${atual}/${total}`,
       valorTotalCompra: dividaTotal,
+      ehCarnetAgrupado: total > 1,
     };
   }
 
@@ -192,6 +295,7 @@ export function extrairInfoParcelas(
       numeroParcela: atual,
       rotuloParcela: `Parcela ${atual}/${total}`,
       valorTotalCompra: dividaTotal,
+      ehCarnetAgrupado: total > 1,
     };
   }
 
@@ -201,6 +305,7 @@ export function extrairInfoParcelas(
     numeroParcela: 1,
     rotuloParcela: p ? (p.toLowerCase().startsWith("parcela") ? p : `Parcela ${p}`) : "Parcela 1/1",
     valorTotalCompra: dividaTotal,
+    ehCarnetAgrupado: false,
   };
 }
 
@@ -385,14 +490,18 @@ export function calcularScoreCliente(historico: Row[]): CreditScoreInfo {
   const h = hoje();
   const temFundoPerdido = historico.some(r => r.fundo_perdido);
   const abertas = historico.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
-  const vencidas = abertas.filter(r => r.vencimento && r.vencimento < h);
+  const vencidas = abertas.filter(r => {
+    const vReal = obterVencimentoEfetivo(r) || r.vencimento;
+    return vReal && vReal < h;
+  });
   const totalVencido = vencidas.reduce((s, r) => s + r.saldo_devedor, 0);
   const totalPago = historico.reduce((s, r) => s + (r.valor_pago || 0), 0);
 
   let maiorAtrasoDias = 0;
   for (const r of vencidas) {
-    if (r.vencimento) {
-      const d = diffDias(h, r.vencimento);
+    const vReal = obterVencimentoEfetivo(r) || r.vencimento;
+    if (vReal) {
+      const d = diffDias(h, vReal);
       if (d > maiorAtrasoDias) maiorAtrasoDias = d;
     }
   }

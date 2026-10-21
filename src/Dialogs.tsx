@@ -5,6 +5,7 @@ import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
+  gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses,
 } from "./lib";
 import type { Row, CreditScoreInfo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -24,9 +25,17 @@ export function StatusPill({ r }: { r: Row }) {
 
 export function VencCell({ r }: { r: Row }) {
   const a = alerta(r);
+  const vReal = obterVencimentoEfetivo(r);
+  const mudou = vReal && vReal !== r.vencimento;
+
   return (
     <>
-      <span className="mono">{dt(r.vencimento)}</span>
+      <span className="mono">{dt(vReal || r.vencimento)}</span>
+      {mudou && (
+        <div className="sub" style={{ fontSize: 10, color: "var(--brand)", fontWeight: 600 }} title={`Vencimento original da 1ª parcela: ${dt(r.vencimento)}. Avançado conforme parcelas já pagas do carnê.`}>
+          Próx. venc. carnê
+        </div>
+      )}
       {a.tipo && <div><span className={`al al-${a.tipo}`}>{alertaTexto(a)}</span></div>}
     </>
   );
@@ -427,6 +436,7 @@ export function FichaCliente({
   const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
   const [perdido, setPerdido] = useState<Row | null>(null);
+  const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
 
   const load = useCallback(async () => {
@@ -555,40 +565,55 @@ export function FichaCliente({
               </tr>
             </thead>
             <tbody>
-              {sortedRows.map(r => (
-                <tr key={r.id}>
-                  <td><VencCell r={r} /></td>
-                  <td className="mono">{r.parcelas || "—"}</td>
-                  <td className="n">{money(r.divida_total)}</td>
-                  <td className="n">{money(r.valor_pago)}</td>
-                  <td className="n"><b>{money(r.saldo_devedor)}</b></td>
-                  <td><StatusPill r={r} />{r.fundo_perdido && <div className="sub">{r.fundo_perdido_motivo}{r.fundo_perdido_em ? ` · ${dt(r.fundo_perdido_em.slice(0, 10))}` : ""}</div>}</td>
-                  <td className="acts">
-                    {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
-                      <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
-                        Baixar
-                      </button>
-                    )}
-                    {r.valor_pago > 0 && (
-                      <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                        Log
-                      </button>
-                    )}
-                    {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
-                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
-                      <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
-                        {r.fundo_perdido ? "Desfazer" : "Fundo perdido"}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+              {sortedRows.map(r => {
+                const info = extrairInfoParcelas(r.parcelas);
+                const podeDesmembrar = isAdmin && info.ehCarnetAgrupado && info.totalParcelas > 1 && !r.fundo_perdido;
+                return (
+                  <tr key={r.id}>
+                    <td><VencCell r={r} /></td>
+                    <td className="mono">{r.parcelas || "—"}</td>
+                    <td className="n">{money(r.divida_total)}</td>
+                    <td className="n">{money(r.valor_pago)}</td>
+                    <td className="n"><b>{money(r.saldo_devedor)}</b></td>
+                    <td><StatusPill r={r} />{r.fundo_perdido && <div className="sub">{r.fundo_perdido_motivo}{r.fundo_perdido_em ? ` · ${dt(r.fundo_perdido_em.slice(0, 10))}` : ""}</div>}</td>
+                    <td className="acts">
+                      {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
+                        <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
+                          Baixar
+                        </button>
+                      )}
+                      {podeDesmembrar && (
+                        <button
+                          className="ed"
+                          onClick={() => setDesmembrarRow(r)}
+                          title="Desmembrar este carnê em parcelas mensais individuais"
+                          style={{ color: "var(--brand)", fontWeight: 600 }}
+                        >
+                          Desmembrar
+                        </button>
+                      )}
+                      {r.valor_pago > 0 && (
+                        <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
+                          Log
+                        </button>
+                      )}
+                      {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
+                      {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
+                        <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                          {r.fundo_perdido ? "Desfazer" : "Fundo perdido"}
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
               {!rows.length && <tr><td colSpan={7} style={{ textAlign: "center", color: "var(--mut)", padding: 20 }}>Nenhuma promissória encontrada para este cliente.</td></tr>}
             </tbody>
           </table>
         </div>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
+      {desmembrarRow && <DesmembrarDialog row={desmembrarRow} onClose={() => setDesmembrarRow(null)} onSaved={() => { setDesmembrarRow(null); refresh(); }} />}
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
@@ -1466,6 +1491,557 @@ export function LogDialog({
           telefone={row.telefone}
           mensagem={whatsLog}
           onClose={() => setWhatsLog(null)}
+        />
+      )}
+    </Painel>
+  );
+}
+
+/**
+ * Diálogo para desmembrar um carnê agrupado (ex: 8X) em parcelas mensais individuais (1/8 a 8/8)
+ */
+export function DesmembrarDialog({
+  row,
+  onClose,
+  onSaved,
+}: {
+  row: Row;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const parcelas = useMemo(() => gerarParcelasDesmembradas(row), [row]);
+  const info = useMemo(() => extrairInfoParcelas(row.parcelas), [row.parcelas]);
+
+  const handleConfirmar = async () => {
+    if (parcelas.length <= 1) {
+      setErr("Esta promissória não é um carnê agrupado ou possui apenas 1 parcela.");
+      return;
+    }
+    setBusy(true);
+    setErr("");
+    try {
+      // 1. Atualizar a 1ª parcela mantendo o registro original (ID) para não quebrar referências
+      const p1 = parcelas[0];
+      const statusP1 = deriveStatus(p1);
+      const { error: err1 } = await supabase
+        .from("promissorias")
+        .update({
+          parcelas: p1.parcelas,
+          divida_total: p1.divida_total,
+          valor_pago: p1.valor_pago,
+          saldo_devedor: p1.saldo_devedor,
+          status: statusP1,
+          vencimento: p1.vencimento,
+        })
+        .eq("id", row.id);
+
+      if (err1) throw err1;
+
+      // 2. Inserir as demais parcelas (2/N até N/N)
+      const demais = parcelas.slice(1).map(p => {
+        const st = deriveStatus(p);
+        return {
+          cliente_nome: p.cliente_nome,
+          telefone: p.telefone,
+          divida_total: p.divida_total,
+          valor_pago: p.valor_pago,
+          saldo_devedor: p.saldo_devedor,
+          parcelas: p.parcelas,
+          vencimento: p.vencimento,
+          status: st,
+          origem: `DESMEMBRADO DO ID #${row.id} (${row.parcelas})`,
+          fundo_perdido: false,
+          fundo_perdido_motivo: null,
+          fundo_perdido_em: null,
+        };
+      });
+
+      const { error: err2 } = await supabase.from("promissorias").insert(demais);
+      if (err2) throw err2;
+
+      onSaved();
+    } catch (e: any) {
+      setErr(e.message || "Erro ao desmembrar parcelas no banco de dados.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Painel onClose={onClose} wide>
+      <div style={{ padding: 22, display: "grid", gap: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start" }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 18, color: "var(--ink)" }}>
+              ✂️ Desmembrar Carnê em Parcelas Individuais
+            </h3>
+            <div className="sub" style={{ marginTop: 4 }}>
+              Cliente: <b>{row.cliente_nome}</b> {row.telefone ? `· ${row.telefone}` : ""}
+            </div>
+          </div>
+          <button className="btn ghost" onClick={onClose} disabled={busy}>Fechar</button>
+        </div>
+
+        {err && <div className="err">{err}</div>}
+
+        <div style={{
+          background: "rgba(10, 124, 76, 0.08)",
+          border: "1px solid rgba(10, 124, 76, 0.25)",
+          borderRadius: 8,
+          padding: "12px 16px",
+          fontSize: 13,
+          lineHeight: 1.5,
+          color: "var(--ink)",
+        }}>
+          <b>💡 Como funciona o desmembramento:</b>
+          <br />
+          Esta venda foi registrada como uma única promissória de <b>{money(row.divida_total)}</b> em <b>{row.parcelas}</b>.
+          Ao confirmar, o sistema transformará o registro atual na <b>Parcela 1/{info.totalParcelas}</b> e criará individualmente as parcelas <b>2/{info.totalParcelas}</b> até <b>{info.totalParcelas}/{info.totalParcelas}</b>, com seus respectivos vencimentos mês a mês.
+          O valor pago (<b>{money(row.valor_pago)}</b>) será abatido ordenadamente, eliminando cobranças e status de vencido indevidos!
+        </div>
+
+        <div className="kpis" style={{ margin: 0 }}>
+          <div className="card"><small>Dívida total do carnê</small><b>{money(row.divida_total)}</b></div>
+          <div className="card"><small>Já pago pelo cliente</small><b style={{ color: "var(--brand)" }}>{money(row.valor_pago)}</b></div>
+          <div className="card hl"><small>Saldo a receber</small><b>{money(row.saldo_devedor)}</b></div>
+          <div className="card"><small>Novas parcelas</small><b>{parcelas.length} parcelas</b></div>
+        </div>
+
+        <div>
+          <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>
+            📋 Pré-visualização das parcelas que serão geradas:
+          </div>
+          <div className="wrap" style={{ maxHeight: 280, overflowY: "auto" }}>
+            <table style={{ width: "100%", fontSize: 13 }}>
+              <thead>
+                <tr>
+                  <th>Parcela</th>
+                  <th>Vencimento</th>
+                  <th className="n">Valor</th>
+                  <th className="n">Pago</th>
+                  <th className="n">Saldo</th>
+                  <th>Status Previsto</th>
+                </tr>
+              </thead>
+              <tbody>
+                {parcelas.map((p, idx) => {
+                  const s = deriveStatus(p);
+                  return (
+                    <tr key={idx} style={{ background: idx === 0 ? "var(--soft)" : "transparent" }}>
+                      <td className="mono"><b>{p.parcelas}</b> {idx === 0 && <small style={{ color: "var(--mut)" }}>(ID #{row.id})</small>}</td>
+                      <td className="mono">{dt(p.vencimento)}</td>
+                      <td className="n">{money(p.divida_total)}</td>
+                      <td className="n" style={{ color: p.valor_pago > 0 ? "var(--brand)" : "inherit" }}>{money(p.valor_pago)}</td>
+                      <td className="n"><b>{money(p.saldo_devedor)}</b></td>
+                      <td>
+                        <span className={`pill p-${cls(s)}`}>
+                          {LBL[s]}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8 }}>
+          <span className="sub" style={{ fontSize: 12 }}>
+            A operação é segura e preserva histórico e registros de auditoria.
+          </span>
+          <div style={{ display: "flex", gap: 10 }}>
+            <button className="btn ghost" onClick={onClose} disabled={busy}>Cancelar</button>
+            <button className="btn" onClick={handleConfirmar} disabled={busy || parcelas.length <= 1}>
+              {busy ? "Desmembrando..." : `Confirmar Desmembramento (${parcelas.length}x)`}
+            </button>
+          </div>
+        </div>
+      </div>
+    </Painel>
+  );
+}
+
+/**
+ * Assistente de Varredura do Sistema: identifica carnês agrupados (NX) que geram falsas pendências
+ * e permite desmembrá-los individualmente ou em lote com 1 clique.
+ */
+export function VarreduraParcelasDialog({
+  onClose,
+  onDone,
+}: {
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [loading, setLoading] = useState(true);
+  const [carnes, setCarnes] = useState<Row[]>([]);
+  const [busca, setBusca] = useState("");
+  const [processandoLote, setProcessandoLote] = useState(false);
+  const [progresso, setProgresso] = useState<{ total: number; atual: number; sucesso: number; erros: number } | null>(null);
+  const [desmembrarIndividual, setDesmembrarIndividual] = useState<Row | null>(null);
+  const [sucessoMsg, setSucessoMsg] = useState("");
+
+  const carregarCarnes = useCallback(async () => {
+    setLoading(true);
+    setSucessoMsg("");
+    try {
+      // Buscar promissórias em aberto
+      const { data, error } = await supabase
+        .from("promissorias")
+        .select("*")
+        .gt("saldo_devedor", 0)
+        .order("vencimento", { ascending: true });
+
+      if (error) throw error;
+
+      // Filtrar apenas as que são carnês agrupados NX (ex: 2X, 3X, 8X...)
+      const agrupados = (data || []).filter(r => {
+        if (r.fundo_perdido) return false;
+        const info = extrairInfoParcelas(r.parcelas);
+        return info.ehCarnetAgrupado && info.totalParcelas > 1;
+      });
+
+      setCarnes(agrupados as Row[]);
+    } catch (e: any) {
+      console.error("Erro ao carregar carnês:", e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    carregarCarnes();
+  }, [carregarCarnes]);
+
+  // Estatísticas calculadas
+  const stats = useMemo(() => {
+    let falsasPendencias = 0;
+    let totalDivida = 0;
+    let totalPago = 0;
+    let totalSaldo = 0;
+
+    carnes.forEach(c => {
+      totalDivida += c.divida_total;
+      totalPago += c.valor_pago;
+      totalSaldo += c.saldo_devedor;
+
+      const vencReal = obterVencimentoEfetivo(c);
+      const hj = hoje();
+      // Se a data original do carnê venceu, mas a data real com os pagamentos já feitos ainda NÃO venceu
+      if (c.vencimento && c.vencimento < hj && vencReal && vencReal >= hj) {
+        falsasPendencias++;
+      }
+    });
+
+    return {
+      totalCarnes: carnes.length,
+      falsasPendencias,
+      totalDivida,
+      totalPago,
+      totalSaldo,
+    };
+  }, [carnes]);
+
+  const filtrados = useMemo(() => {
+    const q = busca.trim().toLowerCase();
+    if (!q) return carnes;
+    return carnes.filter(c =>
+      c.cliente_nome.toLowerCase().includes(q) ||
+      (c.telefone && c.telefone.includes(q)) ||
+      (c.parcelas && c.parcelas.toLowerCase().includes(q))
+    );
+  }, [carnes, busca]);
+
+  // Desmembramento de um único registro
+  const executarDesmembramento = async (row: Row) => {
+    const parcelas = gerarParcelasDesmembradas(row);
+    if (parcelas.length <= 1) return false;
+
+    // 1. Atualizar parcela 1
+    const p1 = parcelas[0];
+    const statusP1 = deriveStatus(p1);
+    const { error: err1 } = await supabase
+      .from("promissorias")
+      .update({
+        parcelas: p1.parcelas,
+        divida_total: p1.divida_total,
+        valor_pago: p1.valor_pago,
+        saldo_devedor: p1.saldo_devedor,
+        status: statusP1,
+        vencimento: p1.vencimento,
+      })
+      .eq("id", row.id);
+
+    if (err1) throw err1;
+
+    // 2. Inserir demais parcelas
+    const demais = parcelas.slice(1).map(p => {
+      const st = deriveStatus(p);
+      return {
+        cliente_nome: p.cliente_nome,
+        telefone: p.telefone,
+        divida_total: p.divida_total,
+        valor_pago: p.valor_pago,
+        saldo_devedor: p.saldo_devedor,
+        parcelas: p.parcelas,
+        vencimento: p.vencimento,
+        status: st,
+        origem: `DESMEMBRADO DO ID #${row.id} (${row.parcelas})`,
+        fundo_perdido: false,
+        fundo_perdido_motivo: null,
+        fundo_perdido_em: null,
+      };
+    });
+
+    const { error: err2 } = await supabase.from("promissorias").insert(demais);
+    if (err2) throw err2;
+
+    return true;
+  };
+
+  // Desmembramento em lote
+  const handleDesmembrarEmLote = async () => {
+    if (carnes.length === 0) return;
+    const ok = window.confirm(
+      `Deseja desmembrar todos os ${carnes.length} carnês agrupados em parcelas mensais individuais?\n\nEsta operação regulariza os vencimentos mês a mês e remove pendências falsas de clientes que estão em dia.`
+    );
+    if (!ok) return;
+
+    setProcessandoLote(true);
+    let sucesso = 0;
+    let erros = 0;
+    const total = carnes.length;
+    setProgresso({ total, atual: 0, sucesso: 0, erros: 0 });
+
+    for (let i = 0; i < total; i++) {
+      const c = carnes[i];
+      try {
+        await executarDesmembramento(c);
+        sucesso++;
+      } catch (e) {
+        console.error(`Erro ao desmembrar carnê #${c.id}:`, e);
+        erros++;
+      }
+      setProgresso({ total, atual: i + 1, sucesso, erros });
+    }
+
+    setProcessandoLote(false);
+    setSucessoMsg(`🎉 Operação concluída com sucesso! ${sucesso} carnê(s) foram desmembrados em parcelas mensais.`);
+    await carregarCarnes();
+    onDone();
+  };
+
+  return (
+    <Painel onClose={onClose} wide>
+      <div style={{ padding: 22, display: "grid", gap: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 20, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
+              <span>🔍</span> Varredura de Carnês e Parcelamento
+            </h2>
+            <div className="sub" style={{ marginTop: 4 }}>
+              Auditoria de promissórias agrupadas (ex: 8X) que necessitam de parcelamento mensal para evitar falsas pendências.
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              className="btn"
+              onClick={handleDesmembrarEmLote}
+              disabled={loading || processandoLote || carnes.length === 0}
+              style={{ background: "var(--brand)", color: "#fff", display: "flex", alignItems: "center", gap: 6 }}
+            >
+              <span>⚡</span> Desmembrar Todos ({carnes.length})
+            </button>
+            <button className="btn ghost" onClick={onClose} disabled={processandoLote}>Fechar</button>
+          </div>
+        </div>
+
+        {sucessoMsg && (
+          <div style={{
+            background: "rgba(10, 124, 76, 0.12)",
+            color: "var(--brand)",
+            border: "1px solid var(--brand)",
+            borderRadius: 8,
+            padding: "12px 16px",
+            fontWeight: 600,
+            fontSize: 14,
+          }}>
+            {sucessoMsg}
+          </div>
+        )}
+
+        {processandoLote && progresso && (
+          <div style={{
+            background: "var(--soft)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: 16,
+            display: "grid",
+            gap: 8,
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, fontWeight: 600 }}>
+              <span>Desmembrando carnês em parcelas mensais...</span>
+              <span>{progresso.atual} de {progresso.total} ({Math.round((progresso.atual / progresso.total) * 100)}%)</span>
+            </div>
+            <div style={{ width: "100%", height: 10, background: "var(--line)", borderRadius: 5, overflow: "hidden" }}>
+              <div
+                style={{
+                  width: `${(progresso.atual / progresso.total) * 100}%`,
+                  height: "100%",
+                  background: "var(--brand)",
+                  transition: "width 0.2s ease",
+                }}
+              />
+            </div>
+            <div style={{ fontSize: 12, color: "var(--mut)" }}>
+              {progresso.sucesso} processados com sucesso · {progresso.erros} erros
+            </div>
+          </div>
+        )}
+
+        <div className="kpis" style={{ margin: 0 }}>
+          <div className="card">
+            <small>Carnês agrupados</small>
+            <b>{stats.totalCarnes}</b>
+            <span className="ksub">promissórias com formato NX</span>
+          </div>
+          <div className="card" style={{ borderLeft: "4px solid #b42318" }}>
+            <small>Falsas pendências (em dia)</small>
+            <b style={{ color: stats.falsasPendencias > 0 ? "#b42318" : "var(--brand)" }}>
+              {stats.falsasPendencias} clientes
+            </b>
+            <span className="ksub">em dia, mas marcados com atraso</span>
+          </div>
+          <div className="card">
+            <small>Já pago nesses carnês</small>
+            <b style={{ color: "var(--brand)" }}>{money(stats.totalPago)}</b>
+            <span className="ksub">total amortizado pelos clientes</span>
+          </div>
+          <div className="card hl">
+            <small>Saldo a receber</small>
+            <b>{money(stats.totalSaldo)}</b>
+            <span className="ksub">distribuído nos meses futuros</span>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+          <input
+            type="search"
+            placeholder="Filtrar por nome do cliente ou telefone..."
+            value={busca}
+            onChange={e => setBusca(e.target.value)}
+            style={{ maxWidth: 360 }}
+          />
+          <span className="sub" style={{ fontSize: 12 }}>
+            Mostrando <b>{filtrados.length}</b> de <b>{carnes.length}</b> registros
+          </span>
+        </div>
+
+        <div className="wrap" style={{ maxHeight: 380, overflowY: "auto" }}>
+          <table style={{ width: "100%" }}>
+            <thead>
+              <tr>
+                <th>Cliente / Telefone</th>
+                <th>Carnê</th>
+                <th>1º Vencimento</th>
+                <th>Próx. Venc. Real</th>
+                <th className="n">Dívida Total</th>
+                <th className="n">Já Pago</th>
+                <th className="n">Saldo</th>
+                <th>Diagnóstico</th>
+                <th style={{ textAlign: "right" }}>Ação</th>
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: "center", padding: 30, color: "var(--mut)" }}>
+                    Carregando carnês do sistema...
+                  </td>
+                </tr>
+              ) : filtrados.length === 0 ? (
+                <tr>
+                  <td colSpan={9} style={{ textAlign: "center", padding: 30, color: "var(--mut)" }}>
+                    {busca ? "Nenhum carnê corresponde à busca." : "Nenhum carnê agrupado pendente encontrado!"}
+                  </td>
+                </tr>
+              ) : (
+                filtrados.map(c => {
+                  const vencReal = obterVencimentoEfetivo(c);
+                  const hj = hoje();
+                  const falsoVencido = c.vencimento && c.vencimento < hj && vencReal && vencReal >= hj;
+
+                  return (
+                    <tr key={c.id}>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{c.cliente_nome}</div>
+                        <div className="sub mono" style={{ fontSize: 11 }}>{c.telefone || "Sem telefone"}</div>
+                      </td>
+                      <td className="mono"><b>{c.parcelas}</b></td>
+                      <td className="mono">{dt(c.vencimento)}</td>
+                      <td className="mono">
+                        <span style={{
+                          color: falsoVencido ? "var(--brand)" : "inherit",
+                          fontWeight: falsoVencido ? 700 : 500,
+                        }}>
+                          {dt(vencReal)}
+                        </span>
+                      </td>
+                      <td className="n">{money(c.divida_total)}</td>
+                      <td className="n" style={{ color: c.valor_pago > 0 ? "var(--brand)" : "inherit" }}>
+                        {money(c.valor_pago)}
+                      </td>
+                      <td className="n"><b>{money(c.saldo_devedor)}</b></td>
+                      <td>
+                        {falsoVencido ? (
+                          <span
+                            className="pill p-pago"
+                            style={{ background: "rgba(10, 124, 76, 0.12)", color: "var(--brand)", fontSize: 11 }}
+                            title="O cliente já pagou as parcelas que venceram e está rigorosamente EM DIA. A pendência é falsa devido ao carnê estar agrupado."
+                          >
+                            ⭐ Em dia (Falso atraso)
+                          </span>
+                        ) : (
+                          <StatusPill r={c} />
+                        )}
+                      </td>
+                      <td className="acts">
+                        <button
+                          className="ed"
+                          onClick={() => setDesmembrarIndividual(c)}
+                          disabled={processandoLote}
+                          style={{ color: "var(--brand)", fontWeight: 600 }}
+                          title="Desmembrar este carnê em parcelas mensais"
+                        >
+                          Desmembrar
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span className="sub" style={{ fontSize: 12 }}>
+            💡 Dica: Após desmembrar, cada parcela terá seu próprio vencimento mês a mês e o score do cliente refletirá a pontualidade real.
+          </span>
+          <button className="btn ghost" onClick={onClose} disabled={processandoLote}>Fechar</button>
+        </div>
+      </div>
+
+      {desmembrarIndividual && (
+        <DesmembrarDialog
+          row={desmembrarIndividual}
+          onClose={() => setDesmembrarIndividual(null)}
+          onSaved={() => {
+            setDesmembrarIndividual(null);
+            carregarCarnes();
+            onDone();
+          }}
         />
       )}
     </Painel>

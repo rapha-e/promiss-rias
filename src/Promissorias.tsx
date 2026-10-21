@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
-import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV } from "./lib";
+import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV, extrairInfoParcelas } from "./lib";
 import type { Row, Status } from "./lib";
-import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
+import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog, DesmembrarDialog, VarreduraParcelasDialog } from "./Dialogs";
 
 type Resumo = {
   total: number; divida: number; pago: number; saldo: number; perdido: number; status: Record<Status, number>;
@@ -93,6 +93,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState<Row | null>(null);
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
+  const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
+  const [varreduraOpen, setVarreduraOpen] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -561,6 +563,16 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             )}
           </div>
 
+          {isAdmin && (
+            <button
+              className="btn ghost"
+              onClick={() => setVarreduraOpen(true)}
+              title="Varredura do sistema para identificar e desmembrar carnês com pendências indevidas"
+              style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}
+            >
+              <span>🔍</span> Varredura de Carnês
+            </button>
+          )}
           {isAdmin && <button className="btn" onClick={() => setEditing(null)}>+ Nova promissória</button>}
         </div>
       </div>
@@ -1081,33 +1093,42 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 <td className="n">{money(r.valor_pago)}</td>
                 <td className="n"><b>{money(r.saldo_devedor)}</b></td>
                 <td><VencCell r={r} /></td>
-                <td><StatusPill r={r} />{r.fundo_perdido && r.fundo_perdido_motivo && <div className="sub" title={r.fundo_perdido_motivo}>{r.fundo_perdido_motivo.slice(0, 28)}</div>}</td>
-                <td className="acts">
-                  {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
-                    <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
-                      Baixar
-                    </button>
-                  )}
-                  {r.valor_pago > 0 && (
-                    <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                      Log
-                    </button>
-                  )}
-                  {!r.fundo_perdido && r.saldo_devedor > 0 && (
-                    <button className="ed" onClick={() => setWhats(r)} title="Cobrar por WhatsApp">
-                      Whats
-                    </button>
-                  )}
-                  {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
-                  {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
-                    <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
-                      {r.fundo_perdido ? "Desfazer" : "F. Perdido"}
-                    </button>
-                  )}
-                </td>
-              </tr>
-            );
-          })}
+                       <td className="acts">
+                    {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
+                      <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
+                        Baixar
+                      </button>
+                    )}
+                    {isAdmin && extrairInfoParcelas(r.parcelas).ehCarnetAgrupado && extrairInfoParcelas(r.parcelas).totalParcelas > 1 && !r.fundo_perdido && (
+                      <button
+                        className="ed"
+                        onClick={() => setDesmembrarRow(r)}
+                        title="Desmembrar este carnê em parcelas mensais individuais"
+                        style={{ color: "var(--brand)", fontWeight: 600 }}
+                      >
+                        Desmembrar
+                      </button>
+                    )}
+                    {r.valor_pago > 0 && (
+                      <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
+                        Log
+                      </button>
+                    )}
+                    {!r.fundo_perdido && r.saldo_devedor > 0 && (
+                      <button className="ed" onClick={() => setWhats(r)} title="Cobrar por WhatsApp">
+                        Whats
+                      </button>
+                    )}
+                    {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
+                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
+                      <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                        {r.fundo_perdido ? "Desfazer" : "F. Perdido"}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
             {!rows.length && <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--mut)", padding: 30 }}>Nenhum registro encontrado.</td></tr>}
           </tbody>
         </table>
@@ -1118,6 +1139,24 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         <button className="btn ghost" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>→</button>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
+      {desmembrarRow && (
+        <DesmembrarDialog
+          row={desmembrarRow}
+          onClose={() => setDesmembrarRow(null)}
+          onSaved={() => {
+            setDesmembrarRow(null);
+            refresh();
+          }}
+        />
+      )}
+      {varreduraOpen && (
+        <VarreduraParcelasDialog
+          onClose={() => setVarreduraOpen(false)}
+          onDone={() => {
+            refresh();
+          }}
+        />
+      )}
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing !== undefined && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
