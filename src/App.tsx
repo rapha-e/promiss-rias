@@ -4,6 +4,7 @@ import type { Session } from "@supabase/supabase-js";
 import { configured, supabase } from "./supabase";
 import Promissorias from "./Promissorias";
 import Clientes from "./Clientes";
+import CobrancaWhatsApp from "./CobrancaWhatsApp";
 import Relatorio from "./Relatorio";
 import logo from "./logo.png";
 
@@ -43,7 +44,12 @@ function Login() {
   );
 }
 
-const TABS = [["promissorias", "Promissórias"], ["clientes", "Clientes"], ["relatorio", "Relatório"]] as const;
+const TABS = [
+  ["promissorias", "Promissórias"],
+  ["clientes", "Clientes"],
+  ["cobranca", "Cobrança WhatsApp"],
+  ["relatorio", "Relatório"],
+] as const;
 type Tab = (typeof TABS)[number][0];
 
 function Shell({ session }: { session: Session }) {
@@ -69,6 +75,7 @@ function Shell({ session }: { session: Session }) {
       <main>
         {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
         {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
+        {tab === "cobranca" && <CobrancaWhatsApp />}
         {tab === "relatorio" && <Relatorio />}
       </main>
     </>
