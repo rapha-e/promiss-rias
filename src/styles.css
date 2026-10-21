@@ -106,7 +106,12 @@ label{display:grid;gap:5px;font-size:13px;color:var(--mut)}label input{color:var
 .acts{white-space:nowrap;text-align:right}.acts .ed{margin-left:6px}
 .s-FUNDO{--c:var(--mut)}.p-FUNDO{color:var(--mut)}
 textarea{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font:inherit;color:var(--ink);width:100%;resize:vertical}
-.panel.wide{width:min(900px,100%)}
+.panel.wide{width:min(1180px,96vw)}
+.panel table{width:100%;min-width:0}
+.panel th, .panel td{padding:8px 10px}
+.panel .acts{display:inline-flex;gap:4px;justify-content:flex-end;align-items:center;white-space:nowrap}
+.panel .acts .btn-baixa{padding:4px 9px;font-size:12px}
+.panel .acts .ed{padding:4px 8px;font-size:12px;margin:0}
 .faixas{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
 @media(max-width:820px){.faixas{grid-template-columns:1fr 1fr}}
 label.inl{display:flex;align-items:center;gap:6px;color:var(--mut)}

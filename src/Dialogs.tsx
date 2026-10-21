@@ -75,6 +75,22 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
   const st = ok ? derive(T, G, d) : null;
 
+  async function handleDelete() {
+    if (!row) return;
+    const confirmou = window.confirm(
+      `Deseja realmente EXCLUIR permanentemente a promissória de ${row.cliente_nome} no valor de ${money(row.divida_total)}?\n\n` +
+      `Atenção: Esta ação é definitiva e removerá este título do sistema e de todos os relatórios.`
+    );
+    if (!confirmou) return;
+
+    setBusy(true);
+    setErr("");
+    const { error } = await supabase.from("promissorias").delete().eq("id", row.id);
+    setBusy(false);
+    if (error) return setErr("Não foi possível excluir: " + error.message);
+    onSaved();
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (n.trim().length < 2) return setErr("Informe o nome do cliente.");
@@ -244,11 +260,25 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         )}
 
         <div className="err">{err}</div>
-        <div className="r2">
-          <button type="button" className="btn ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn" disabled={busy}>
-            {busy ? "Salvando…" : isNova && qtd > 1 ? `Salvar (${qtd} promissórias)` : "Salvar"}
-          </button>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 }}>
+          {!isNova ? (
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ color: "var(--bad)", borderColor: "var(--bad)", padding: "8px 12px", fontSize: 13 }}
+              onClick={handleDelete}
+              disabled={busy}
+              title="Excluir promissória permanentemente"
+            >
+              Excluir promissória
+            </button>
+          ) : <div />}
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="btn ghost" onClick={onClose}>Cancelar</button>
+            <button className="btn" disabled={busy}>
+              {busy ? "Salvando…" : isNova && qtd > 1 ? `Salvar (${qtd} promissórias)` : "Salvar"}
+            </button>
+          </div>
         </div>
       </form>
     </Painel>
@@ -436,7 +466,7 @@ export function FichaCliente({
           <div className="card"><small>Promissórias</small><b>{rows.length}</b>{tot.f > 0 && <span className="ksub">Fundo perdido: {money(tot.f)}</span>}</div>
         </div>
         <div className="wrap">
-          <table style={{ minWidth: 640 }}>
+          <table style={{ width: "100%" }}>
             <thead>
               <tr>
                 <th className={`sortable ${sortCol === "vencimento" ? "active" : ""}`} onClick={() => handleSort("vencimento")} title="Clique para ordenar por Vencimento">
@@ -457,7 +487,7 @@ export function FichaCliente({
                 <th className={`sortable ${sortCol === "status" ? "active" : ""}`} onClick={() => handleSort("status")} title="Clique para ordenar por Status">
                   <span className="th-content">Status <SortIcon col="status" sortCol={sortCol} sortAsc={sortAsc} /></span>
                 </th>
-                <th />
+                <th style={{ textAlign: "right" }}>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -477,11 +507,15 @@ export function FichaCliente({
                     )}
                     {r.valor_pago > 0 && (
                       <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                        Ver log
+                        Log
                       </button>
                     )}
-                    {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
-                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
+                    {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
+                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
+                      <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                        {r.fundo_perdido ? "Desfazer" : "Fundo perdido"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

@@ -100,7 +100,7 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
                 <th className={`sortable ${sortCol === "status" ? "active" : ""}`} onClick={() => handleSort("status")} title="Clique para ordenar por Status">
                   <span className="th-content">Status <SortIcon col="status" sortCol={sortCol} sortAsc={sortAsc} /></span>
                 </th>
-                <th />
+                <th style={{ textAlign: "right" }}>Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -120,11 +120,15 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
                     )}
                     {r.valor_pago > 0 && (
                       <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                        Ver log
+                        Log
                       </button>
                     )}
-                    {isAdmin && <button className="ed" onClick={() => setEditing(r)}>Editar</button>}
-                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && <button className="ed" onClick={() => setPerdido(r)}>{r.fundo_perdido ? "Desfazer" : "Fundo perdido"}</button>}
+                    {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
+                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
+                      <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                        {r.fundo_perdido ? "Desfazer" : "Fundo perdido"}
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}
