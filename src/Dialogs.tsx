@@ -461,7 +461,7 @@ export function FichaCliente({
         {err && <div className="err">{err}</div>}
         <div className="kpis" style={{ margin: 0 }}>
           <div className="card hl"><small>Saldo a receber</small><b>{money(tot.s)}</b></div>
-          <div className="card"><small>Total devido</small><b>{money(tot.d)}</b></div>
+          <div className="card"><small>Total de venda</small><b>{money(tot.d)}</b></div>
           <div className="card"><small>Total pago</small><b>{money(tot.p)}</b></div>
           <div className="card"><small>Promissórias</small><b>{rows.length}</b>{tot.f > 0 && <span className="ksub">Fundo perdido: {money(tot.f)}</span>}</div>
         </div>

@@ -201,7 +201,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       <section className="kpis">
         <div className="card hl"><small>Saldo a receber</small><b>{money(resumo?.saldo ?? 0)}</b>
           {!!resumo?.perdido && <span className="ksub">Fundo perdido: {money(resumo.perdido)} (fora do saldo)</span>}</div>
-        <div className="card"><small>Total da dívida</small><b>{money(resumo?.divida ?? 0)}</b></div>
+        <div className="card"><small>Total de venda</small><b>{money(resumo?.divida ?? 0)}</b></div>
         <div className="card"><small>Total pago</small><b>{money(resumo?.pago ?? 0)}</b></div>
         <div className="card"><small>Promissórias</small><b>{(resumo?.total ?? 0).toLocaleString("pt-BR")}</b></div>
       </section>
