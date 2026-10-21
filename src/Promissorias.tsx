@@ -96,10 +96,34 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
   const [varreduraOpen, setVarreduraOpen] = useState(false);
   const [error, setError] = useState("");
+  const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
 
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
     return () => clearTimeout(h);
+  }, [q]);
+
+  // Auto preenchimento inteligente ao digitar na barra de busca
+  useEffect(() => {
+    const val = q.trim();
+    if (val.length < 2) {
+      setSugestoesBusca([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await supabase
+          .from("promissorias")
+          .select("cliente_nome")
+          .ilike("cliente_nome", `%${val}%`)
+          .limit(12);
+        if (data) {
+          const unicos = Array.from(new Set(data.map(d => d.cliente_nome.trim()))).slice(0, 8);
+          setSugestoesBusca(unicos);
+        }
+      } catch {}
+    }, 200);
+    return () => clearTimeout(t);
   }, [q]);
 
   const loadResumo = useCallback(async () => {
@@ -642,7 +666,19 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         ))}
       </div>
       <div className="bar" style={{ flexWrap: "wrap", gap: 10 }}>
-        <input type="search" placeholder="Buscar por cliente ou telefone" value={q} onChange={e => setQ(e.target.value)} />
+        <input
+          type="search"
+          placeholder="Buscar por cliente ou telefone"
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          list="lista-clientes-promissorias"
+          autoComplete="off"
+        />
+        <datalist id="lista-clientes-promissorias">
+          {sugestoesBusca.map((s, idx) => (
+            <option key={idx} value={s} />
+          ))}
+        </datalist>
 
         <select
           value={tipoPeriodo}

@@ -157,10 +157,34 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
   const [sel, setSel] = useState<Cli | null>(null);
   const [whats, setWhats] = useState<Cli | null>(null);
   const [error, setError] = useState("");
+  const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
 
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
     return () => clearTimeout(h);
+  }, [q]);
+
+  // Auto preenchimento ao digitar na barra de busca de clientes
+  useEffect(() => {
+    const val = q.trim();
+    if (val.length < 2) {
+      setSugestoesBusca([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      try {
+        const { data } = await supabase
+          .from("promissorias")
+          .select("cliente_nome")
+          .ilike("cliente_nome", `%${val}%`)
+          .limit(12);
+        if (data) {
+          const unicos = Array.from(new Set(data.map(d => d.cliente_nome.trim()))).slice(0, 8);
+          setSugestoesBusca(unicos);
+        }
+      } catch {}
+    }, 200);
+    return () => clearTimeout(t);
   }, [q]);
 
   const load = useCallback(async () => {
@@ -207,7 +231,19 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
       </div>
       {error && <div className="warn">Erro: {error}</div>}
       <div className="bar">
-        <input type="search" placeholder="Buscar cliente ou telefone" value={q} onChange={e => setQ(e.target.value)} />
+        <input
+          type="search"
+          placeholder="Buscar cliente ou telefone"
+          value={q}
+          onChange={e => setQ(e.target.value)}
+          list="lista-clientes-busca-tab"
+          autoComplete="off"
+        />
+        <datalist id="lista-clientes-busca-tab">
+          {sugestoesBusca.map((s, idx) => (
+            <option key={idx} value={s} />
+          ))}
+        </datalist>
         <button className={`chip ${abertos ? "on" : ""}`} onClick={() => { setAbertos(!abertos); setPage(0); }}>Somente com saldo em aberto</button>
       </div>
       <div className="wrap">

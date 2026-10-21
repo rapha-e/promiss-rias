@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
@@ -53,25 +53,198 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [busy, setBusy] = useState(false);
   const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
 
+  // Estados do Auto Preenchimento Inteligente ao digitar (Autocomplete)
+  const [sugestoes, setSugestoes] = useState<{
+    nome: string;
+    telefone: string;
+    totalCompras: number;
+    saldoAberto: number;
+    temAtraso: boolean;
+    scoreInfo?: CreditScoreInfo;
+  }[]>([]);
+  const [mostrarSugestoes, setMostrarSugestoes] = useState(false);
+  const [sugestaoAtiva, setSugestaoAtiva] = useState(-1);
+  const [buscandoSugestoes, setBuscandoSugestoes] = useState(false);
+  const [sugestaoPorTelefone, setSugestaoPorTelefone] = useState<{ nome: string; telefone: string } | null>(null);
+
+  const containerNomeRef = useRef<HTMLDivElement>(null);
+  const inputNomeRef = useRef<HTMLInputElement>(null);
+  const inputTelRef = useRef<HTMLInputElement>(null);
+  const inputValorRef = useRef<HTMLInputElement>(null);
+
+  // Selecionar cliente e auto preencher os campos instantaneamente
+  const selecionarCliente = useCallback((sug: { nome: string; telefone: string; scoreInfo?: CreditScoreInfo }) => {
+    setN(sug.nome);
+    if (sug.telefone) {
+      setP(mascaraTelefone(sug.telefone));
+    }
+    if (sug.scoreInfo) {
+      setScoreCliente(sug.scoreInfo);
+    }
+    setMostrarSugestoes(false);
+    setSugestaoAtiva(-1);
+    setSugestaoPorTelefone(null);
+
+    // Foco automático no próximo campo
+    setTimeout(() => {
+      if (!sug.telefone) {
+        inputTelRef.current?.focus();
+      } else {
+        inputValorRef.current?.focus();
+      }
+    }, 60);
+  }, []);
+
+  // Fechar dropdown de sugestões ao clicar fora
+  useEffect(() => {
+    function handleClickOutside(ev: MouseEvent) {
+      if (containerNomeRef.current && !containerNomeRef.current.contains(ev.target as Node)) {
+        setMostrarSugestoes(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Busca e sugestões em tempo real ao digitar o nome do cliente
   useEffect(() => {
     const nome = n.trim();
-    if (nome.length < 3) {
+    if (nome.length < 2) {
+      setSugestoes([]);
+      setMostrarSugestoes(false);
       setScoreCliente(null);
       return;
     }
+
+    setBuscandoSugestoes(true);
     const timer = setTimeout(async () => {
-      const { data } = await supabase
-        .from("promissorias")
-        .select("*")
-        .ilike("cliente_nome", `%${nome}%`);
-      if (data && data.length > 0) {
-        setScoreCliente(calcularScoreCliente(data as Row[]));
-      } else {
-        setScoreCliente(null);
+      try {
+        const { data } = await supabase
+          .from("promissorias")
+          .select("cliente_nome, telefone, divida_total, valor_pago, saldo_devedor, vencimento, fundo_perdido")
+          .ilike("cliente_nome", `%${nome}%`)
+          .order("vencimento", { ascending: false })
+          .limit(40);
+
+        if (!data || data.length === 0) {
+          setSugestoes([]);
+          setMostrarSugestoes(false);
+          setScoreCliente(null);
+          return;
+        }
+
+        // Agrupar por cliente único
+        const mapa = new Map<string, {
+          nome: string;
+          telefones: string[];
+          rows: Row[];
+        }>();
+
+        data.forEach(r => {
+          const nomeNorm = r.cliente_nome.trim();
+          if (!mapa.has(nomeNorm)) {
+            mapa.set(nomeNorm, {
+              nome: nomeNorm,
+              telefones: [],
+              rows: [],
+            });
+          }
+          const item = mapa.get(nomeNorm)!;
+          item.rows.push(r as Row);
+          if (r.telefone && r.telefone.trim() && !item.telefones.includes(r.telefone.trim())) {
+            item.telefones.push(r.telefone.trim());
+          }
+        });
+
+        const lista: {
+          nome: string;
+          telefone: string;
+          totalCompras: number;
+          saldoAberto: number;
+          temAtraso: boolean;
+          scoreInfo?: CreditScoreInfo;
+        }[] = [];
+        const termoLower = nome.toLowerCase();
+
+        mapa.forEach(item => {
+          const score = calcularScoreCliente(item.rows);
+          const telValido = item.telefones[0] || "";
+          const saldoAberto = item.rows.reduce((acc, r) => acc + (r.fundo_perdido ? 0 : r.saldo_devedor), 0);
+          const temAtraso = score.totalVencido > 0;
+
+          lista.push({
+            nome: item.nome,
+            telefone: telValido,
+            totalCompras: item.rows.length,
+            saldoAberto,
+            temAtraso,
+            scoreInfo: score,
+          });
+        });
+
+        // Ordenar: primeiro os que começam exatamente com o termo digitado
+        lista.sort((a, b) => {
+          const aStart = a.nome.toLowerCase().startsWith(termoLower);
+          const bStart = b.nome.toLowerCase().startsWith(termoLower);
+          if (aStart && !bStart) return -1;
+          if (!aStart && bStart) return 1;
+          return a.nome.localeCompare(b.nome, "pt-BR");
+        });
+
+        const topSugestoes = lista.slice(0, 8);
+        setSugestoes(topSugestoes);
+        setSugestaoAtiva(-1);
+
+        // Se o nome digitado for exatamente o de algum cliente, ativa o score dele
+        const matchExato = lista.find(s => s.nome.toLowerCase() === termoLower);
+        if (matchExato && matchExato.scoreInfo) {
+          setScoreCliente(matchExato.scoreInfo);
+        }
+      } catch (err) {
+        console.error("Erro no autocomplete de clientes:", err);
+      } finally {
+        setBuscandoSugestoes(false);
       }
-    }, 350);
+    }, 200);
+
     return () => clearTimeout(timer);
   }, [n]);
+
+  // Auto-preenchimento ao digitar no campo Telefone
+  useEffect(() => {
+    const nums = p.replace(/\D/g, "");
+    if (nums.length >= 8 && (!n.trim() || n.trim().length < 3)) {
+      const timer = setTimeout(async () => {
+        try {
+          const { data } = await supabase
+            .from("promissorias")
+            .select("cliente_nome, telefone")
+            .ilike("telefone", `%${nums}%`)
+            .order("id", { ascending: false })
+            .limit(5);
+
+          if (data && data.length > 0) {
+            const primeiro = data[0];
+            if (primeiro.cliente_nome && primeiro.cliente_nome.trim().toLowerCase() !== n.trim().toLowerCase()) {
+              setSugestaoPorTelefone({
+                nome: primeiro.cliente_nome.trim(),
+                telefone: primeiro.telefone || p,
+              });
+            } else {
+              setSugestaoPorTelefone(null);
+            }
+          } else {
+            setSugestaoPorTelefone(null);
+          }
+        } catch {
+          setSugestaoPorTelefone(null);
+        }
+      }, 250);
+      return () => clearTimeout(timer);
+    } else {
+      setSugestaoPorTelefone(null);
+    }
+  }, [p, n]);
 
   const T = parse(t);
   const G = parse(g);
@@ -168,10 +341,179 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     <Painel onClose={onClose}>
       <form onSubmit={submit} autoComplete="off">
         <h2 style={{ margin: 0 }}>{row ? "Editar promissória" : "Nova promissória"}</h2>
-        <label>
-          Cliente
-          <input value={n} onChange={e => setN(e.target.value)} maxLength={180} required placeholder="Nome do cliente" />
-        </label>
+        <div ref={containerNomeRef} style={{ position: "relative" }}>
+          <label>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span>Cliente</span>
+              {buscandoSugestoes ? (
+                <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 600 }}>
+                  🔍 Buscando cliente...
+                </span>
+              ) : sugestoes.length > 0 && mostrarSugestoes ? (
+                <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 600 }}>
+                  ✨ {sugestoes.length} cliente(s) encontrado(s)
+                </span>
+              ) : null}
+            </div>
+            <div style={{ position: "relative", width: "100%" }}>
+              <input
+                ref={inputNomeRef}
+                value={n}
+                onChange={e => {
+                  setN(e.target.value);
+                  setMostrarSugestoes(true);
+                }}
+                onFocus={() => {
+                  if (sugestoes.length > 0) setMostrarSugestoes(true);
+                }}
+                onKeyDown={e => {
+                  if (!mostrarSugestoes || sugestoes.length === 0) return;
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault();
+                    setSugestaoAtiva(prev => (prev < sugestoes.length - 1 ? prev + 1 : 0));
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault();
+                    setSugestaoAtiva(prev => (prev > 0 ? prev - 1 : sugestoes.length - 1));
+                  } else if (e.key === "Enter") {
+                    if (sugestaoAtiva >= 0 && sugestaoAtiva < sugestoes.length) {
+                      e.preventDefault();
+                      selecionarCliente(sugestoes[sugestaoAtiva]);
+                    }
+                  } else if (e.key === "Tab") {
+                    if (sugestaoAtiva >= 0 && sugestaoAtiva < sugestoes.length) {
+                      selecionarCliente(sugestoes[sugestaoAtiva]);
+                    } else if (sugestoes.length > 0) {
+                      selecionarCliente(sugestoes[0]);
+                    }
+                  } else if (e.key === "Escape") {
+                    setMostrarSugestoes(false);
+                  }
+                }}
+                maxLength={180}
+                required
+                placeholder="Digite o nome para auto preencher..."
+                autoComplete="off"
+              />
+            </div>
+          </label>
+
+          {/* Menu Dropdown de Auto Preenchimento */}
+          {mostrarSugestoes && sugestoes.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: "100%",
+                left: 0,
+                right: 0,
+                zIndex: 100,
+                background: "var(--card)",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                boxShadow: "0 12px 30px rgba(0, 0, 0, 0.18)",
+                marginTop: 4,
+                overflow: "hidden",
+                maxHeight: 280,
+                overflowY: "auto",
+              }}
+            >
+              <div
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 11,
+                  fontWeight: 700,
+                  textTransform: "uppercase",
+                  letterSpacing: ".05em",
+                  color: "var(--mut)",
+                  background: "var(--soft)",
+                  borderBottom: "1px solid var(--line)",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                }}
+              >
+                <span>Clientes Cadastrados (Clique ou Enter para preencher)</span>
+                <span>{sugestoes.length}</span>
+              </div>
+              {sugestoes.map((sug, idx) => {
+                const ativo = idx === sugestaoAtiva;
+                return (
+                  <div
+                    key={sug.nome + idx}
+                    onClick={() => selecionarCliente(sug)}
+                    onMouseEnter={() => setSugestaoAtiva(idx)}
+                    style={{
+                      padding: "10px 14px",
+                      cursor: "pointer",
+                      background: ativo ? "var(--soft)" : "transparent",
+                      borderBottom: "1px solid var(--line)",
+                      display: "flex",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      gap: 10,
+                      transition: "background 0.12s ease",
+                    }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13.5, color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }}>
+                        <span>👤</span>
+                        <span style={{ textOverflow: "ellipsis", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          {sug.nome}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, fontSize: 11.5, color: "var(--mut)", marginTop: 3, alignItems: "center", flexWrap: "wrap" }}>
+                        {sug.telefone ? (
+                          <span className="mono" style={{ color: "var(--brand)", fontWeight: 600 }}>
+                            📞 {mascaraTelefone(sug.telefone)}
+                          </span>
+                        ) : (
+                          <span>Sem telefone</span>
+                        )}
+                        <span>·</span>
+                        <span>{sug.totalCompras} compra{sug.totalCompras !== 1 ? "s" : ""}</span>
+                        {sug.saldoAberto > 0 && (
+                          <>
+                            <span>·</span>
+                            <span style={{ color: sug.temAtraso ? "var(--bad)" : "var(--warn)", fontWeight: 600 }}>
+                              Saldo: {money(sug.saldoAberto)}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    {sug.scoreInfo && (
+                      <span
+                        style={{
+                          fontSize: 10.5,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          background: sug.scoreInfo.bgCor,
+                          color: sug.scoreInfo.cor,
+                          border: `1px solid ${sug.scoreInfo.cor}40`,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {sug.scoreInfo.selo}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+              <div
+                style={{
+                  padding: "6px 12px",
+                  fontSize: 11,
+                  color: "var(--mut)",
+                  background: "var(--soft)",
+                  textAlign: "center",
+                }}
+              >
+                💡 Dica: Use <b>↑ ↓</b> para navegar e <b>Enter</b> ou <b>Tab</b> para auto preencher
+              </div>
+            </div>
+          )}
+        </div>
+
         {scoreCliente && (
           <div
             style={{
@@ -194,17 +536,67 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             </div>
           </div>
         )}
-        <label>
-          Telefone
-          <input value={p} onChange={e => setP(mascaraTelefone(e.target.value))} inputMode="tel" maxLength={40} placeholder="(61) 99999-9999" />
-        </label>
+
+        <div>
+          <label>
+            Telefone
+            <input
+              ref={inputTelRef}
+              value={p}
+              onChange={e => setP(mascaraTelefone(e.target.value))}
+              inputMode="tel"
+              maxLength={40}
+              placeholder="(61) 99999-9999"
+            />
+          </label>
+          {sugestaoPorTelefone && (
+            <div
+              style={{
+                marginTop: 6,
+                padding: "8px 12px",
+                borderRadius: 8,
+                background: "rgba(15, 118, 110, 0.08)",
+                border: "1px solid var(--brand)",
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: 8,
+                fontSize: 12,
+              }}
+            >
+              <div>
+                <span>💡 Cliente cadastrado com este telefone: </span>
+                <b style={{ color: "var(--brand)" }}>{sugestaoPorTelefone.nome}</b>
+              </div>
+              <button
+                type="button"
+                className="btn"
+                style={{ padding: "3px 8px", fontSize: 11, borderRadius: 6 }}
+                onClick={() => {
+                  setN(sugestaoPorTelefone.nome);
+                  setSugestaoPorTelefone(null);
+                  inputValorRef.current?.focus();
+                }}
+              >
+                ⚡ Auto preencher
+              </button>
+            </div>
+          )}
+        </div>
 
         {isNova ? (
           <>
             <div className="r2">
               <label>
                 Valor total da dívida (R$)
-                <input value={t} onChange={e => setT(e.target.value)} inputMode="decimal" placeholder="0,00" required />
+                <input
+                  ref={inputValorRef}
+                  value={t}
+                  onChange={e => setT(e.target.value)}
+                  inputMode="decimal"
+                  placeholder="0,00"
+                  required
+                />
               </label>
               <label>
                 Número de promissórias
