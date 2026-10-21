@@ -13,8 +13,9 @@ type Resumo = {
 const PS = 50;
 
 import { SortIcon } from "./SortIcon";
+import { HeaderFilterMenu } from "./HeaderFilterMenu";
 
-type VencFiltro = "" | "vencidas" | "hoje";
+type VencFiltro = "" | "vencidas" | "hoje" | "proximos_7";
 
 const ANOS_DISPONIVEIS = Array.from({ length: 15 }, (_, i) => 2020 + i);
 
@@ -32,6 +33,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [qd, setQd] = useState("");
   const [status, setStatus] = useState("");
   const [venc, setVenc] = useState<VencFiltro>("");
+  const [filtroCliente, setFiltroCliente] = useState("");
+  const [filtroClienteTemp, setFiltroClienteTemp] = useState("");
+  const [filtroTelefone, setFiltroTelefone] = useState<"" | "com" | "sem">("");
+  const [filtroDivida, setFiltroDivida] = useState("");
+  const [filtroPago, setFiltroPago] = useState("");
+  const [filtroSaldo, setFiltroSaldo] = useState("");
   const [tipoPeriodo, setTipoPeriodo] = useState<"todos" | "mes" | "ano" | "dia">("todos");
   const [ini, setIni] = useState("");
   const [fim, setFim] = useState("");
@@ -91,8 +98,35 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     if (ini) query = query.gte("vencimento", ini);
     if (fim) query = query.lte("vencimento", fim);
 
+    if (filtroCliente) query = query.ilike("cliente_nome", `%${filtroCliente.trim()}%`);
+
+    if (filtroTelefone === "com") {
+      query = query.not("telefone", "is", null).neq("telefone", "");
+    } else if (filtroTelefone === "sem") {
+      query = query.or("telefone.is.null,telefone.eq.''");
+    }
+
+    if (filtroDivida === "ate_200") query = query.lte("divida_total", 200);
+    else if (filtroDivida === "200_500") query = query.gte("divida_total", 200).lte("divida_total", 500);
+    else if (filtroDivida === "500_1000") query = query.gte("divida_total", 500).lte("divida_total", 1000);
+    else if (filtroDivida === "mais_1000") query = query.gt("divida_total", 1000);
+
+    if (filtroPago === "com") query = query.gt("valor_pago", 0);
+    else if (filtroPago === "sem") query = query.eq("valor_pago", 0);
+
+    if (filtroSaldo === "aberto") query = query.gt("saldo_devedor", 0);
+    else if (filtroSaldo === "quitado") query = query.lte("saldo_devedor", 0);
+    else if (filtroSaldo === "ate_500") query = query.gt("saldo_devedor", 0).lte("saldo_devedor", 500);
+    else if (filtroSaldo === "mais_500") query = query.gt("saldo_devedor", 500);
+
     if (venc === "vencidas") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
     else if (venc === "hoje") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).eq("vencimento", h);
+    else if (venc === "proximos_7") {
+      const d7 = new Date();
+      d7.setDate(d7.getDate() + 7);
+      const d7Str = d7.toISOString().slice(0, 10);
+      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", d7Str);
+    }
 
     if (sortCol === "status") {
       query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
@@ -104,7 +138,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const { data, count: c, error } = await query.order("id").range(page * PS, page * PS + PS - 1);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc]);
+  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc, filtroCliente, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
 
   const loadProjecaoPeriodo = useCallback(async () => {
     if (!ini && !fim) {
@@ -172,8 +206,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     reset();
   };
 
-  const handleSort = (col: string) => {
-    if (sortCol === col) {
+  const handleSort = (col: string, asc?: boolean) => {
+    if (asc !== undefined) {
+      setSortCol(col);
+      setSortAsc(asc);
+    } else if (sortCol === col) {
       setSortAsc(a => !a);
     } else {
       setSortCol(col);
@@ -185,6 +222,20 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         setSortAsc(true);
       }
     }
+    reset();
+  };
+
+  const temFiltrosAtivos = Boolean(filtroCliente || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc);
+
+  const limparTodosFiltros = () => {
+    setFiltroCliente("");
+    setFiltroClienteTemp("");
+    setFiltroTelefone("");
+    setFiltroDivida("");
+    setFiltroPago("");
+    setFiltroSaldo("");
+    setStatus("");
+    setVenc("");
     reset();
   };
 
@@ -400,31 +451,242 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         </select>
       </div>
 
+      {temFiltrosAtivos && (
+        <div className="active-filters-bar">
+          <span style={{ fontWeight: 600, color: "var(--mut)" }}>Filtros ativos:</span>
+          {filtroCliente && (
+            <span className="filter-chip">
+              Cliente: {filtroCliente}
+              <button type="button" onClick={() => { setFiltroCliente(""); setFiltroClienteTemp(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {filtroTelefone && (
+            <span className="filter-chip">
+              Telefone: {filtroTelefone === "com" ? "Com telefone" : "Sem telefone"}
+              <button type="button" onClick={() => { setFiltroTelefone(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {filtroDivida && (
+            <span className="filter-chip">
+              Dívida: {
+                filtroDivida === "ate_200" ? "Até R$ 200" :
+                filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
+                filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" : "Acima de R$ 1.000"
+              }
+              <button type="button" onClick={() => { setFiltroDivida(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {filtroPago && (
+            <span className="filter-chip">
+              Pago: {filtroPago === "com" ? "Com pagamento" : "Sem pagamento"}
+              <button type="button" onClick={() => { setFiltroPago(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {filtroSaldo && (
+            <span className="filter-chip">
+              Saldo: {
+                filtroSaldo === "aberto" ? "Em aberto" :
+                filtroSaldo === "quitado" ? "Quitado" :
+                filtroSaldo === "ate_500" ? "Até R$ 500" : "Acima de R$ 500"
+              }
+              <button type="button" onClick={() => { setFiltroSaldo(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {venc && (
+            <span className="filter-chip">
+              Vencimento: {venc === "vencidas" ? "Vencidas" : venc === "hoje" ? "Hoje" : "Próximos 7 dias"}
+              <button type="button" onClick={() => { setVenc(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {status && (
+            <span className="filter-chip">
+              Status: {status}
+              <button type="button" onClick={() => { setStatus(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          <button
+            type="button"
+            className="btn ghost"
+            style={{ padding: "2px 8px", fontSize: 11, borderRadius: 99, color: "var(--bad)" }}
+            onClick={limparTodosFiltros}
+          >
+            Limpar todos os filtros
+          </button>
+        </div>
+      )}
+
       <div className="wrap">
         <table>
           <thead>
             <tr>
-              <th className={`sortable ${sortCol === "cliente_nome" ? "active" : ""}`} onClick={() => handleSort("cliente_nome")} title="Clique para ordenar por Cliente">
-                <span className="th-content">Cliente <SortIcon col="cliente_nome" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable ${sortCol === "telefone" ? "active" : ""}`} onClick={() => handleSort("telefone")} title="Clique para ordenar por Telefone">
-                <span className="th-content">Telefone <SortIcon col="telefone" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable n ${sortCol === "divida_total" ? "active" : ""}`} onClick={() => handleSort("divida_total")} title="Clique para ordenar por Dívida">
-                <span className="th-content">Dívida <SortIcon col="divida_total" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable n ${sortCol === "valor_pago" ? "active" : ""}`} onClick={() => handleSort("valor_pago")} title="Clique para ordenar por Valor Pago">
-                <span className="th-content">Pago <SortIcon col="valor_pago" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable n ${sortCol === "saldo_devedor" ? "active" : ""}`} onClick={() => handleSort("saldo_devedor")} title="Clique para ordenar por Saldo Devedor">
-                <span className="th-content">Saldo <SortIcon col="saldo_devedor" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable ${sortCol === "vencimento" ? "active" : ""}`} onClick={() => handleSort("vencimento")} title="Clique para ordenar por Vencimento">
-                <span className="th-content">Vencimento <SortIcon col="vencimento" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
-              <th className={`sortable ${sortCol === "status" ? "active" : ""}`} onClick={() => handleSort("status")} title="Clique para ordenar por Status">
-                <span className="th-content">Status <SortIcon col="status" sortCol={sortCol} sortAsc={sortAsc} /></span>
-              </th>
+              <HeaderFilterMenu
+                title="Cliente"
+                col="cliente_nome"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(filtroCliente)}
+                filterLabel={filtroCliente}
+                onClearFilter={() => { setFiltroCliente(""); setFiltroClienteTemp(""); reset(); }}
+                customFilterContent={
+                  <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
+                    <input
+                      type="text"
+                      placeholder="Filtrar por nome..."
+                      value={filtroClienteTemp}
+                      onChange={e => setFiltroClienteTemp(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === "Enter") {
+                          setFiltroCliente(filtroClienteTemp);
+                          reset();
+                        }
+                      }}
+                      style={{
+                        flex: 1,
+                        padding: "5px 8px",
+                        fontSize: 12,
+                        borderRadius: 6,
+                        border: "1px solid var(--line)",
+                        background: "var(--card)",
+                        color: "var(--ink)",
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="btn"
+                      style={{ padding: "4px 8px", fontSize: 12 }}
+                      onClick={() => {
+                        setFiltroCliente(filtroClienteTemp);
+                        reset();
+                      }}
+                    >
+                      OK
+                    </button>
+                  </div>
+                }
+              />
+              <HeaderFilterMenu
+                title="Telefone"
+                col="telefone"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(filtroTelefone)}
+                filterLabel={filtroTelefone === "com" ? "Com telefone" : "Sem telefone"}
+                onClearFilter={() => { setFiltroTelefone(""); reset(); }}
+                options={[
+                  { label: "Todos os telefones", value: "", active: filtroTelefone === "" },
+                  { label: "Com telefone cadastrado", value: "com", active: filtroTelefone === "com" },
+                  { label: "Sem telefone cadastrado", value: "sem", active: filtroTelefone === "sem" },
+                ]}
+                onSelectOption={val => { setFiltroTelefone(val as any); reset(); }}
+              />
+              <HeaderFilterMenu
+                title="Dívida"
+                col="divida_total"
+                align="right"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(filtroDivida)}
+                filterLabel={
+                  filtroDivida === "ate_200" ? "Até R$ 200" :
+                  filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
+                  filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" :
+                  filtroDivida === "mais_1000" ? "Acima de R$ 1.000" : ""
+                }
+                onClearFilter={() => { setFiltroDivida(""); reset(); }}
+                options={[
+                  { label: "Qualquer valor de venda", value: "", active: filtroDivida === "" },
+                  { label: "Até R$ 200", value: "ate_200", active: filtroDivida === "ate_200" },
+                  { label: "R$ 200 a R$ 500", value: "200_500", active: filtroDivida === "200_500" },
+                  { label: "R$ 500 a R$ 1.000", value: "500_1000", active: filtroDivida === "500_1000" },
+                  { label: "Acima de R$ 1.000", value: "mais_1000", active: filtroDivida === "mais_1000" },
+                ]}
+                onSelectOption={val => { setFiltroDivida(val); reset(); }}
+              />
+              <HeaderFilterMenu
+                title="Pago"
+                col="valor_pago"
+                align="right"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(filtroPago)}
+                filterLabel={filtroPago === "com" ? "Com pagamento" : "Sem pagamento"}
+                onClearFilter={() => { setFiltroPago(""); reset(); }}
+                options={[
+                  { label: "Todos", value: "", active: filtroPago === "" },
+                  { label: "Com algum pagamento (> R$ 0)", value: "com", active: filtroPago === "com" },
+                  { label: "Nenhum pagamento feito", value: "sem", active: filtroPago === "sem" },
+                ]}
+                onSelectOption={val => { setFiltroPago(val); reset(); }}
+              />
+              <HeaderFilterMenu
+                title="Saldo"
+                col="saldo_devedor"
+                align="right"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(filtroSaldo)}
+                filterLabel={
+                  filtroSaldo === "aberto" ? "Em aberto" :
+                  filtroSaldo === "quitado" ? "Quitado" :
+                  filtroSaldo === "ate_500" ? "Até R$ 500" :
+                  filtroSaldo === "mais_500" ? "Acima de R$ 500" : ""
+                }
+                onClearFilter={() => { setFiltroSaldo(""); reset(); }}
+                options={[
+                  { label: "Todos os saldos", value: "", active: filtroSaldo === "" },
+                  { label: "Com saldo em aberto", value: "aberto", active: filtroSaldo === "aberto" },
+                  { label: "Quitado (saldo zero)", value: "quitado", active: filtroSaldo === "quitado" },
+                  { label: "Saldo até R$ 500", value: "ate_500", active: filtroSaldo === "ate_500" },
+                  { label: "Saldo acima de R$ 500", value: "mais_500", active: filtroSaldo === "mais_500" },
+                ]}
+                onSelectOption={val => { setFiltroSaldo(val); reset(); }}
+              />
+              <HeaderFilterMenu
+                title="Vencimento"
+                col="vencimento"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(venc)}
+                filterLabel={
+                  venc === "vencidas" ? "Vencidas" :
+                  venc === "hoje" ? "Vencem hoje" :
+                  venc === "proximos_7" ? "Próximos 7 dias" : ""
+                }
+                onClearFilter={() => { setVenc(""); reset(); }}
+                options={[
+                  { label: "Todos os vencimentos", value: "", active: venc === "" },
+                  { label: "Vencidas (em atraso)", value: "vencidas", active: venc === "vencidas", badge: resumo?.vencidas_qtd },
+                  { label: "Vencem hoje", value: "hoje", active: venc === "hoje", badge: resumo?.hoje_qtd },
+                  { label: "Próximos 7 dias", value: "proximos_7", active: venc === "proximos_7" },
+                ]}
+                onSelectOption={val => { toggleVenc(val as any); }}
+              />
+              <HeaderFilterMenu
+                title="Status"
+                col="status"
+                sortCol={sortCol}
+                sortAsc={sortAsc}
+                onSort={handleSort}
+                isFiltered={Boolean(status)}
+                filterLabel={status || "Todas"}
+                onClearFilter={() => { setStatus(""); reset(); }}
+                options={[
+                  { label: "Todas", value: "", active: status === "" },
+                  { label: "Em aberto", value: "ABERTO", active: status === "ABERTO" },
+                  { label: "Quitado", value: "QUITADO", active: status === "QUITADO" },
+                  { label: "Pagando", value: "PAGANDO", active: status === "PAGANDO" },
+                  { label: "A vencer", value: "A VENCER", active: status === "A VENCER" },
+                  { label: "Não pagou", value: "NÃO PAGOU", active: status === "NÃO PAGOU" },
+                  { label: "Fundo perdido", value: "FUNDO PERDIDO", active: status === "FUNDO PERDIDO" },
+                ]}
+                onSelectOption={val => { setStatus(val); reset(); }}
+              />
               <th />
             </tr>
           </thead>
