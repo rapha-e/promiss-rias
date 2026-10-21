@@ -4,8 +4,8 @@ import type { Session } from "@supabase/supabase-js";
 import { configured, supabase } from "./supabase";
 import Promissorias from "./Promissorias";
 import Clientes from "./Clientes";
-import CobrancaWhatsApp from "./CobrancaWhatsApp";
-import Relatorio from "./Relatorio";
+import RenegociacaoCobranca from "./RenegociacaoCobranca";
+import Dashboard from "./Dashboard";
 import logo from "./logo.png";
 
 function Login() {
@@ -45,16 +45,16 @@ function Login() {
 }
 
 const TABS = [
+  ["dashboard", "Dashboard"],
   ["promissorias", "Promissórias"],
   ["clientes", "Clientes"],
-  ["cobranca", "Cobrança WhatsApp"],
-  ["relatorio", "Relatório"],
+  ["renegociacao", "Renegociação & Cobrança"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
 function Shell({ session }: { session: Session }) {
   const [role, setRole] = useState<"user" | "admin">("user");
-  const [tab, setTab] = useState<Tab>("promissorias");
+  const [tab, setTab] = useState<Tab>("dashboard");
   const isAdmin = role === "admin";
   useEffect(() => {
     supabase.from("profiles").select("role").eq("id", session.user.id).maybeSingle()
@@ -73,10 +73,10 @@ function Shell({ session }: { session: Session }) {
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </nav>
       <main>
+        {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
         {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
         {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
-        {tab === "cobranca" && <CobrancaWhatsApp />}
-        {tab === "relatorio" && <Relatorio />}
+        {tab === "renegociacao" && <RenegociacaoCobranca />}
       </main>
     </>
   );

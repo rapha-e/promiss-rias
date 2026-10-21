@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { supabase } from "./supabase";
-import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money } from "./lib";
+import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV } from "./lib";
 import type { Row, Status } from "./lib";
 import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 
@@ -239,14 +239,210 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     reset();
   };
 
+  const [menuExportar, setMenuExportar] = useState(false);
+  const [exportando, setExportando] = useState(false);
+
+  const exportarRelatorioExcel = async () => {
+    setExportando(true);
+    setMenuExportar(false);
+    try {
+      let query = supabase.from("promissorias").select("*");
+      const s = qd.replace(/[%,()*]/g, " ").trim();
+      if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+      const h = hoje();
+      if (status === "ABERTO") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
+      else if (status === "QUITADO") query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
+      else if (status === "PAGANDO") query = query.eq("fundo_perdido", false).gt("valor_pago", 0).gt("saldo_devedor", 0);
+      else if (status === "A VENCER") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).or(`vencimento.gte.${h},vencimento.is.null`);
+      else if (status === "NÃO PAGOU") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).lt("vencimento", h);
+      else if (status === "FUNDO PERDIDO") query = query.eq("fundo_perdido", true);
+
+      if (filtroCliente) query = query.ilike("cliente_nome", `%${filtroCliente.trim()}%`);
+      if (filtroTelefone === "com") query = query.not("telefone", "is", null).neq("telefone", "");
+      else if (filtroTelefone === "sem") query = query.or("telefone.is.null,telefone.eq.''");
+
+      if (filtroDivida === "ate_200") query = query.lte("divida_total", 200);
+      else if (filtroDivida === "200_500") query = query.gte("divida_total", 200).lte("divida_total", 500);
+      else if (filtroDivida === "500_1000") query = query.gte("divida_total", 500).lte("divida_total", 1000);
+      else if (filtroDivida === "mais_1000") query = query.gt("divida_total", 1000);
+
+      if (filtroPago === "com") query = query.gt("valor_pago", 0);
+      else if (filtroPago === "sem") query = query.eq("valor_pago", 0);
+
+      if (filtroSaldo === "aberto") query = query.gt("saldo_devedor", 0);
+      else if (filtroSaldo === "quitado") query = query.lte("saldo_devedor", 0);
+      else if (filtroSaldo === "ate_500") query = query.gt("saldo_devedor", 0).lte("saldo_devedor", 500);
+      else if (filtroSaldo === "mais_500") query = query.gt("saldo_devedor", 500);
+
+      if (ini) query = query.gte("vencimento", ini);
+      if (fim) query = query.lte("vencimento", fim);
+
+      if (venc === "vencidas") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
+      else if (venc === "hoje") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).eq("vencimento", h);
+      else if (venc === "proximos_7") {
+        const d7 = new Date();
+        d7.setDate(d7.getDate() + 7);
+        const d7Str = d7.toISOString().slice(0, 10);
+        query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", d7Str);
+      }
+
+      if (sortCol === "status") {
+        query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
+      } else if (sortCol === "vencimento") {
+        query = query.order("vencimento", { ascending: sortAsc, nullsFirst: false });
+      } else {
+        query = query.order(sortCol, { ascending: sortAsc });
+      }
+
+      const { data, error: errQuery } = await query.range(0, 4999);
+      if (errQuery) throw new Error(errQuery.message);
+
+      const dadosParaExportar = (data || rows) as Row[];
+      const cab = [
+        "ID",
+        "Cliente",
+        "Telefone",
+        "Parcela",
+        "Total Venda (R$)",
+        "Valor Pago (R$)",
+        "Saldo Devedor (R$)",
+        "Vencimento",
+        "Status",
+        "Fundo Perdido",
+      ];
+
+      const linhas = dadosParaExportar.map(r => [
+        r.id,
+        r.cliente_nome || "",
+        r.telefone || "",
+        r.parcelas || "Única",
+        (r.divida_total || 0).toFixed(2),
+        (r.valor_pago || 0).toFixed(2),
+        (r.saldo_devedor || 0).toFixed(2),
+        r.vencimento ? dt(r.vencimento) : "—",
+        deriveStatus(r),
+        r.fundo_perdido ? "SIM" : "NÃO",
+      ]);
+
+      baixarCSV(`relatorio-promissorias-${h}.csv`, cab, linhas);
+    } catch (err: any) {
+      alert("Erro ao exportar relatório: " + (err.message || err));
+    } finally {
+      setExportando(false);
+    }
+  };
+
+  const exportarRelatorioPDF = () => {
+    setMenuExportar(false);
+    window.print();
+  };
+
   return (
     <>
+      {/* Cabeçalho de Impressão (visível apenas na impressão/PDF) */}
+      <div className="printonly" style={{ marginBottom: 16 }}>
+        <h1 style={{ margin: 0, fontSize: 20 }}>LeoÓticas — Relatório Operacional de Promissórias</h1>
+        <div style={{ fontSize: 12, color: "#555", marginTop: 4 }}>
+          Emitido em {dt(hoje())} · Base filtrada com {count} promissória{count !== 1 ? "s" : ""}
+          {status && ` · Status: ${status}`}
+          {venc && ` · Vencimento: ${venc}`}
+          {ini && fim && ` · Período: ${dt(ini)} até ${dt(fim)}`}
+        </div>
+      </div>
+
       <div className="head2 noprint">
         <div>
           <h1>Acompanhe o que ainda falta receber</h1>
           <div className="sub">Saldo, status e projeções de recebimento calculados em tempo real.</div>
         </div>
-        {isAdmin && <button className="btn" onClick={() => setEditing(null)}>+ Nova promissória</button>}
+
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Menu Exportar Relatório */}
+          <div style={{ position: "relative" }}>
+            <button
+              type="button"
+              className="btn ghost"
+              onClick={() => setMenuExportar(prev => !prev)}
+              disabled={exportando}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            >
+              <span>📥</span> {exportando ? "Exportando…" : "Exportar Relatório ▾"}
+            </button>
+
+            {menuExportar && (
+              <>
+                <div
+                  style={{ position: "fixed", inset: 0, zIndex: 90 }}
+                  onClick={() => setMenuExportar(false)}
+                />
+                <div
+                  style={{
+                    position: "absolute",
+                    right: 0,
+                    top: "calc(100% + 4px)",
+                    background: "var(--card)",
+                    border: "1px solid var(--line)",
+                    borderRadius: 10,
+                    boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                    zIndex: 100,
+                    minWidth: 210,
+                    padding: 6,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 4,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={exportarRelatorioExcel}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "8px 12px",
+                      background: "transparent",
+                      border: 0,
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--soft)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span>📗</span> Exportar para Excel (.csv)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={exportarRelatorioPDF}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      width: "100%",
+                      padding: "8px 12px",
+                      background: "transparent",
+                      border: 0,
+                      borderRadius: 6,
+                      cursor: "pointer",
+                      textAlign: "left",
+                      fontSize: 13,
+                      fontWeight: 600,
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "var(--soft)")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <span>📕</span> Exportar para PDF / Imprimir
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+
+          {isAdmin && <button className="btn" onClick={() => setEditing(null)}>+ Nova promissória</button>}
+        </div>
       </div>
       {error && <div className="warn">Erro: {error}</div>}
       <section className="kpis">
