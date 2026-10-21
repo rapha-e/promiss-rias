@@ -39,6 +39,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [mesFim, setMesFim] = useState("");
   const [anoIni, setAnoIni] = useState("");
   const [anoFim, setAnoFim] = useState("");
+  const [projecaoPeriodo, setProjecaoPeriodo] = useState<{ qtd: number; valor: number } | null>(null);
   const [sortCol, setSortCol] = useState("vencimento");
   const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(0);
@@ -117,9 +118,31 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
   }, [qd, status, ini, fim, sortCol, sortAsc, page, venc]);
 
+  const loadProjecaoPeriodo = useCallback(async () => {
+    if (!ini && !fim) {
+      setProjecaoPeriodo(null);
+      return;
+    }
+    let query = supabase
+      .from("promissorias")
+      .select("saldo_devedor")
+      .eq("fundo_perdido", false)
+      .gt("saldo_devedor", 0);
+    if (ini) query = query.gte("vencimento", ini);
+    if (fim) query = query.lte("vencimento", fim);
+    const { data, error } = await query;
+    if (error || !data) {
+      setProjecaoPeriodo(null);
+      return;
+    }
+    const valor = data.reduce((s, r) => s + (r.saldo_devedor ?? 0), 0);
+    setProjecaoPeriodo({ qtd: data.length, valor });
+  }, [ini, fim]);
+
   useEffect(() => { loadResumo(); }, [loadResumo]);
   useEffect(() => { loadRows(); }, [loadRows]);
-  const refresh = () => { loadRows(); loadResumo(); };
+  useEffect(() => { loadProjecaoPeriodo(); }, [loadProjecaoPeriodo]);
+  const refresh = () => { loadRows(); loadResumo(); loadProjecaoPeriodo(); };
 
   const pages = Math.max(1, Math.ceil(count / PS));
   const st = resumo?.status;
@@ -144,6 +167,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setMesFim("");
     setAnoIni("");
     setAnoFim("");
+    setProjecaoPeriodo(null);
     reset();
   };
 
@@ -377,6 +401,25 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <option value="status:asc">Status</option>
         </select>
       </div>
+
+      {projecaoPeriodo !== null && (
+        <div className="projecao-box">
+          <div className="projecao-box-left">
+            <span className="projecao-box-tag">Valor projetado no período</span>
+            <div className="projecao-box-main">
+              <span className="projecao-box-valor">{money(projecaoPeriodo.valor)}</span>
+              <span className="projecao-box-desc">projetado a receber</span>
+            </div>
+          </div>
+          <div className="projecao-box-right">
+            <span><b>{projecaoPeriodo.qtd.toLocaleString("pt-BR")}</b> promissória{projecaoPeriodo.qtd !== 1 ? "s" : ""} com saldo em aberto</span>
+            <span className="projecao-box-periodo">
+              {ini && fim ? `Vencimentos de ${dt(ini)} até ${dt(fim)}` : ini ? `Vencimentos a partir de ${dt(ini)}` : `Vencimentos até ${dt(fim)}`}
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="wrap">
         <table>
           <thead>
