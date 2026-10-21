@@ -199,3 +199,242 @@ export function baixarCSV(nome: string, cab: string[], linhas: (string | number)
   a.href = url; a.download = nome; a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// PIX COPIA E COLA (PADRÃO BACEN BR CODE / EMVCO) -------------------------------
+function emv(id: string, value: string): string {
+  const len = String(value.length).padStart(2, "0");
+  return `${id}${len}${value}`;
+}
+
+function crc16Ccitt(str: string): string {
+  let crc = 0xffff;
+  for (let i = 0; i < str.length; i++) {
+    crc ^= str.charCodeAt(i) << 8;
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = ((crc << 1) ^ 0x1021) & 0xffff;
+      } else {
+        crc = (crc << 1) & 0xffff;
+      }
+    }
+  }
+  return crc.toString(16).padStart(4, "0");
+}
+
+export function gerarPayloadPix({
+  chave,
+  nomeRecebedor = "LEO OTICAS",
+  cidade = "FORTALEZA",
+  valor,
+  txid = "***",
+}: {
+  chave: string;
+  nomeRecebedor?: string;
+  cidade?: string;
+  valor?: number;
+  txid?: string;
+}): string {
+  const chaveLimpa = chave.trim();
+  if (!chaveLimpa) return "";
+
+  const nomeNorm = nomeRecebedor.normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 25).toUpperCase();
+  const cidNorm = cidade.normalize("NFD").replace(/[\u0300-\u036f]/g, "").slice(0, 15).toUpperCase();
+  const txNorm = (txid || "***").slice(0, 25);
+
+  let merchantAccount = emv("00", "br.gov.bcb.pix");
+  merchantAccount += emv("01", chaveLimpa);
+
+  let payload = "";
+  payload += emv("00", "01"); // Payload Format Indicator
+  payload += emv("01", "12"); // Point of Initiation
+  payload += emv("26", merchantAccount);
+  payload += emv("52", "0000"); // Merchant Category Code
+  payload += emv("53", "986"); // Currency BRL
+
+  if (valor && valor > 0) {
+    payload += emv("54", valor.toFixed(2));
+  }
+
+  payload += emv("58", "BR"); // Country
+  payload += emv("59", nomeNorm || "LEO OTICAS");
+  payload += emv("60", cidNorm || "FORTALEZA");
+
+  const additionalData = emv("05", txNorm);
+  payload += emv("62", additionalData);
+
+  // CRC16
+  payload += "6304";
+  const crc = crc16Ccitt(payload);
+  return `${payload}${crc.toUpperCase()}`;
+}
+
+// SCORE INTERNO DE CRÉDITO (CREDIT SCORING LEOÓTICAS) ----------------------------
+export type CreditScoreInfo = {
+  score: "A" | "B" | "C" | "D";
+  selo: string;
+  rotulo: string;
+  cor: string;
+  bgCor: string;
+  descricao: string;
+  recomendacaoVenda: string;
+  totalTitulos: number;
+  totalVencido: number;
+  totalPago: number;
+  maiorAtrasoDias: number;
+  temFundoPerdido: boolean;
+};
+
+export function calcularScoreCliente(historico: Row[]): CreditScoreInfo {
+  if (!historico || historico.length === 0) {
+    return {
+      score: "A",
+      selo: "🟢 Novo Cliente",
+      rotulo: "Novo Cliente",
+      cor: "var(--brand)",
+      bgCor: "rgba(10, 124, 76, 0.1)",
+      descricao: "Primeira compra no crediário da loja.",
+      recomendacaoVenda: "Crédito sujeito à conferência cadastral inicial.",
+      totalTitulos: 0,
+      totalVencido: 0,
+      totalPago: 0,
+      maiorAtrasoDias: 0,
+      temFundoPerdido: false,
+    };
+  }
+
+  const h = hoje();
+  const temFundoPerdido = historico.some(r => r.fundo_perdido);
+  const abertas = historico.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
+  const vencidas = abertas.filter(r => r.vencimento && r.vencimento < h);
+  const totalVencido = vencidas.reduce((s, r) => s + r.saldo_devedor, 0);
+  const totalPago = historico.reduce((s, r) => s + (r.valor_pago || 0), 0);
+
+  let maiorAtrasoDias = 0;
+  for (const r of vencidas) {
+    if (r.vencimento) {
+      const d = diffDias(h, r.vencimento);
+      if (d > maiorAtrasoDias) maiorAtrasoDias = d;
+    }
+  }
+
+  if (temFundoPerdido) {
+    return {
+      score: "D",
+      selo: "⛔ Fundo Perdido",
+      rotulo: "Fundo Perdido",
+      cor: "#64748b",
+      bgCor: "rgba(100, 116, 139, 0.15)",
+      descricao: "Possui promissórias anteriores marcadas como Fundo Perdido.",
+      recomendacaoVenda: "⛔ BLOQUEADO: Exigir quitação das pendências antigas antes de liberar novo crediário.",
+      totalTitulos: historico.length,
+      totalVencido,
+      totalPago,
+      maiorAtrasoDias,
+      temFundoPerdido: true,
+    };
+  }
+
+  if (totalVencido > 0 || maiorAtrasoDias > 15) {
+    return {
+      score: "C",
+      selo: `🔴 Risco Alto (${maiorAtrasoDias}d)`,
+      rotulo: "Inadimplente",
+      cor: "var(--bad)",
+      bgCor: "rgba(180, 35, 24, 0.12)",
+      descricao: `Possui ${vencidas.length} promissória(s) vencida(s) totalizando ${money(totalVencido)}.`,
+      recomendacaoVenda: "⚠️ ATENÇÃO: Não liberar novo crediário sem entrada mínima de 50% ou quitação do atraso.",
+      totalTitulos: historico.length,
+      totalVencido,
+      totalPago,
+      maiorAtrasoDias,
+      temFundoPerdido: false,
+    };
+  }
+
+  if (maiorAtrasoDias > 0 || abertas.length > 2) {
+    return {
+      score: "B",
+      selo: "🟡 Regular / Bom Pagador",
+      rotulo: "Regular",
+      cor: "var(--warn)",
+      bgCor: "rgba(217, 119, 6, 0.12)",
+      descricao: "Histórico de pagamentos consistente com pequenos atrasos operacionais.",
+      recomendacaoVenda: "Crédito liberado alinhando o vencimento com a data de pagamento do cliente.",
+      totalTitulos: historico.length,
+      totalVencido: 0,
+      totalPago,
+      maiorAtrasoDias,
+      temFundoPerdido: false,
+    };
+  }
+
+  return {
+    score: "A",
+    selo: "🟢 Cliente Diamante",
+    rotulo: "Diamante",
+    cor: "var(--brand)",
+    bgCor: "rgba(10, 124, 76, 0.12)",
+    descricao: "Histórico exemplar! Quita no prazo e sem pendências ativas.",
+    recomendacaoVenda: "⭐ Crédito 100% liberado com limite máximo da loja.",
+    totalTitulos: historico.length,
+    totalVencido: 0,
+    totalPago,
+    maiorAtrasoDias: 0,
+    temFundoPerdido: false,
+  };
+}
+
+// PROMESSAS DE PAGAMENTO (FOLLOW-UP) -------------------------------------------
+export type PromessaPagamento = {
+  id: string;
+  cliente: string;
+  telefone: string;
+  dataPromessa: string; // YYYY-MM-DD
+  valor: number;
+  observacao?: string;
+  criadaEm: string;
+  cumprida: boolean;
+};
+
+const CHAVE_PROMESSAS = "leooticas_promessas_pagamento";
+
+export function obterPromessasPagamento(): PromessaPagamento[] {
+  try {
+    const raw = localStorage.getItem(CHAVE_PROMESSAS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function salvarPromessaPagamento(promessa: Omit<PromessaPagamento, "id" | "criadaEm" | "cumprida">): PromessaPagamento {
+  const todas = obterPromessasPagamento();
+  const nova: PromessaPagamento = {
+    ...promessa,
+    id: `prom_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    criadaEm: new Date().toISOString(),
+    cumprida: false,
+  };
+  const atualizadas = [nova, ...todas];
+  try {
+    localStorage.setItem(CHAVE_PROMESSAS, JSON.stringify(atualizadas));
+  } catch {}
+  return nova;
+}
+
+export function marcarPromessaCumprida(id: string): void {
+  const todas = obterPromessasPagamento();
+  const atualizadas = todas.map(p => (p.id === id ? { ...p, cumprida: true } : p));
+  try {
+    localStorage.setItem(CHAVE_PROMESSAS, JSON.stringify(atualizadas));
+  } catch {}
+}
+
+export function excluirPromessa(id: string): void {
+  const todas = obterPromessasPagamento();
+  const atualizadas = todas.filter(p => p.id !== id);
+  try {
+    localStorage.setItem(CHAVE_PROMESSAS, JSON.stringify(atualizadas));
+  } catch {}
+}
+

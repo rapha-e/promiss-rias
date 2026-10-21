@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { baixarCSV, dt, hoje, money, normalizarTelefones } from "./lib";
-import type { Row, Status } from "./lib";
+import { baixarCSV, dt, hoje, money, normalizarTelefones, obterPromessasPagamento, marcarPromessaCumprida } from "./lib";
+import type { Row, Status, PromessaPagamento } from "./lib";
 import { FichaCliente, WhatsDialog } from "./Dialogs";
 
 type ResumoRPC = {
@@ -60,6 +60,8 @@ function calcularDiasAtraso(dataHoje: string, venc: string | null): number {
   return Math.round((tH - tV) / (1000 * 60 * 60 * 24));
 }
 
+const META_KEY = "leooticas_meta_recuperacao_mensal";
+
 export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: string, filtro?: string) => void }) {
   const [resumo, setResumo] = useState<ResumoRPC | null>(null);
   const [abertas, setAbertas] = useState<PromissoriaResumida[]>([]);
@@ -69,6 +71,17 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
   const [whats, setWhats] = useState<{ cliente: string; telefone: string; valor: number; vencimento?: string } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
+  const [promessas, setPromessas] = useState<PromessaPagamento[]>([]);
+  const [metaMensal, setMetaMensal] = useState<number>(() => {
+    try {
+      const sal = localStorage.getItem(META_KEY);
+      return sal ? Number(sal) : 15000;
+    } catch {
+      return 15000;
+    }
+  });
+  const [editandoMeta, setEditandoMeta] = useState(false);
+  const [novaMetaStr, setNovaMetaStr] = useState("");
 
   const dataHoje = hoje();
 
@@ -125,6 +138,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       setResumo(res);
       setAbertas(listaAbertas);
       setPerdidas(dadosPerdidos || []);
+      setPromessas(obterPromessasPagamento());
     } catch (e: any) {
       setError(e.message || "Erro ao carregar dados do dashboard.");
     } finally {
@@ -585,6 +599,173 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           </div>
         </div>
       </section>
+
+      {/* BLOCO EXTRA: META MENSAL DE RECUPERAÇÃO & PROMESSAS DE HOJE */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 22 }}>
+        {/* Card Meta Mensal */}
+        <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em" }}>
+              🎯 Meta de Recuperação do Mês
+            </span>
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ fontSize: 11, padding: "2px 8px" }}
+              onClick={() => {
+                if (editandoMeta) {
+                  const val = Number(novaMetaStr.replace(/\D/g, "")) / 100;
+                  if (!isNaN(val) && val > 0) {
+                    setMetaMensal(val);
+                    try { localStorage.setItem(META_KEY, String(val)); } catch {}
+                  }
+                  setEditandoMeta(false);
+                } else {
+                  setNovaMetaStr(metaMensal.toFixed(2));
+                  setEditandoMeta(true);
+                }
+              }}
+            >
+              {editandoMeta ? "Salvar Meta" : "Editar Meta"}
+            </button>
+          </div>
+
+          {editandoMeta ? (
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                type="number"
+                step="100"
+                value={novaMetaStr}
+                onChange={e => setNovaMetaStr(e.target.value)}
+                placeholder="Ex: 15000"
+                style={{ flex: 1, padding: "6px 8px", fontSize: 13, fontWeight: 700 }}
+              />
+            </div>
+          ) : (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div>
+                <b style={{ fontSize: 22 }}>{money(metaMensal)}</b>
+                <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>alvo do mês</span>
+              </div>
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--brand)" }}>
+                {((metricas.totalPago / (metaMensal || 1)) * 100).toFixed(0)}% da meta
+              </span>
+            </div>
+          )}
+
+          {/* Barra de Progresso da Meta */}
+          <div style={{ height: 10, width: "100%", background: "var(--line)", borderRadius: 99, overflow: "hidden" }}>
+            <div
+              style={{
+                height: "100%",
+                width: `${Math.min(100, (metricas.totalPago / (metaMensal || 1)) * 100)}%`,
+                background: "linear-gradient(90deg, #16a34a, #10b981)",
+                borderRadius: 99,
+                transition: "width .4s ease",
+              }}
+            />
+          </div>
+
+          <div style={{ fontSize: 11.5, color: "var(--mut)", display: "flex", justifyContent: "space-between" }}>
+            <span>Recuperado: <b>{money(metricas.totalPago)}</b></span>
+            <span>Restante: <b>{money(Math.max(0, metaMensal - metricas.totalPago))}</b></span>
+          </div>
+        </div>
+
+        {/* Card Promessas de Pagamento para Hoje */}
+        {(() => {
+          const promessasHoje = promessas.filter(p => !p.cumprida && p.dataPromessa === dataHoje);
+          const totalPrometidoHoje = promessasHoje.reduce((s, p) => s + p.valor, 0);
+
+          return (
+            <div
+              className="card"
+              style={{
+                padding: 16,
+                borderLeft: "5px solid #d97706",
+                display: "flex",
+                flexDirection: "column",
+                justifyContent: "space-between",
+                gap: 8,
+                background: promessasHoje.length > 0 ? "rgba(217, 119, 6, 0.05)" : "var(--card)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#d97706" }}>
+                  📅 Promessas para Hoje ({promessasHoje.length})
+                </span>
+                <span style={{ fontSize: 11, color: "var(--mut)" }}>{dt(dataHoje)}</span>
+              </div>
+
+              {promessasHoje.length === 0 ? (
+                <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "10px 0" }}>
+                  Nenhuma promessa de pagamento registrada para hoje. Combine novas datas na Central de Renegociação!
+                </div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 110, overflowY: "auto" }}>
+                  {promessasHoje.map(p => (
+                    <div
+                      key={p.id}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        fontSize: 12,
+                        padding: "4px 6px",
+                        background: "var(--card)",
+                        borderRadius: 6,
+                        border: "1px solid var(--line)",
+                      }}
+                    >
+                      <div>
+                        <b>{p.cliente}</b>
+                        <span style={{ marginLeft: 6, color: "var(--mut)", fontSize: 11 }}>{p.telefone || "Sem tel"}</span>
+                        {p.observacao && <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Obs: {p.observacao}</div>}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ fontWeight: 700, color: "var(--brand)" }}>{money(p.valor)}</span>
+                        {p.telefone && (
+                          <button
+                            type="button"
+                            className="btn-baixa"
+                            style={{ padding: "2px 6px", fontSize: 11, background: "#25D366" }}
+                            onClick={() =>
+                              setWhats({
+                                cliente: p.cliente,
+                                telefone: p.telefone,
+                                valor: p.valor,
+                              })
+                            }
+                            title="Cobrar promessa no WhatsApp"
+                          >
+                            Cobrar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="btn ghost"
+                          style={{ padding: "2px 6px", fontSize: 11 }}
+                          onClick={() => {
+                            marcarPromessaCumprida(p.id);
+                            setPromessas(obterPromessasPagamento());
+                          }}
+                          title="Marcar como cumprida"
+                        >
+                          ✓
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 600 }}>
+                {promessasHoje.length > 0 ? `Total prometido para hoje: ${money(totalPrometidoHoje)}` : "Mantenha o follow-up diário para reduzir atrasos."}
+              </div>
+            </div>
+          );
+        })()}
+      </div>
 
       {/* BLOCO 2: Termômetro da Carteira (Barra Gráfica de Saúde) */}
       <div

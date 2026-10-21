@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, setDDD, titulo } from "./lib";
+import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, setDDD, titulo, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento } from "./lib";
 import type { Row } from "./lib";
 import { FichaCliente } from "./Dialogs";
 
@@ -76,8 +76,15 @@ export default function RenegociacaoCobranca({
   const [diaPagamentoEntrada, setDiaPagamentoEntrada] = useState<string>("hoje");
   const [diaVencimentoParcelas, setDiaVencimentoParcelas] = useState<string>("dia 10 do próximo mês");
 
-  // Modal Ficha do Cliente
+  // Modais adicionais
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
+  const [modalPromessa, setModalPromessa] = useState(false);
+  const [promessaData, setPromessaData] = useState(somaDiasStr(getHojeISO(), 3));
+  const [promessaValor, setPromessaValor] = useState<string>("");
+  const [promessaObs, setPromessaObs] = useState("");
+  const [modalRepactuacao, setModalRepactuacao] = useState(false);
+  const [repactuando, setRepactuando] = useState(false);
+  const [primeiroVencRepactuacao, setPrimeiroVencRepactuacao] = useState(somaDiasStr(getHojeISO(), 30));
 
   const hoje = getHojeISO();
 
@@ -274,13 +281,22 @@ export default function RenegociacaoCobranca({
     const saldoTotal = item.valorTotal;
     const chavePixTxt = chavePix.trim() ? `\n🔑 *Chave PIX:* \`${chavePix.trim()}\`` : "";
 
+    // Gera o código PIX Copia e Cola com o valor com desconto
+    const pixCopiaColaVista = chavePix.trim()
+      ? `\n📋 *PIX Copia e Cola (valor de ${money(simulacao.valorComDesconto)} já preenchido):*\n\`${gerarPayloadPix({
+          chave: chavePix.trim(),
+          valor: simulacao.valorComDesconto,
+          txid: `RENEG${item.promissorias[0]?.id || "1"}`,
+        })}\``
+      : "";
+
     // 1. SCRIPT DE OPÇÃO BINÁRIA (TÉCNICA DE ALTA CONVERSÃO)
     if (tipoScript === "binaria") {
       return (
         `Olá, ${primeiroNome}! Tudo bem? Aqui é da equipe da *LeoÓticas*.\n\n` +
         `Estou entrando em contato referente à sua pendência conosco no valor total de *${money(saldoTotal)}*.\n\n` +
         `Sabemos que imprevistos acontecem e queremos muito te ajudar a regularizar sua situação hoje com tranquilidade. Preparamos duas opções facilitadas:\n\n` +
-        `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de ${money(simulacao.valorDesconto)}) e quitamos seu saldo hoje mesmo!${chavePixTxt}\n\n` +
+        `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de ${money(simulacao.valorDesconto)}) e quitamos seu saldo hoje mesmo!${chavePixTxt}${pixCopiaColaVista}\n\n` +
         `👉 *OPÇÃO 2 (Entrada + Parcelamento):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para ${diaVencimentoParcelas}.\n\n` +
         `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Podemos fechar?`
       );
@@ -292,7 +308,7 @@ export default function RenegociacaoCobranca({
         `Olá, ${primeiroNome}! Oportunidade exclusiva de quitação na *LeoÓticas*!\n\n` +
         `Estamos fechando o balanço de cobranças e a gerência autorizou uma condição especial única para o seu saldo em aberto de *${money(saldoTotal)}*:\n\n` +
         `🎯 *Quitação total por apenas ${money(simulacao.valorComDesconto)} via PIX!* (Você economiza ${money(simulacao.valorDesconto)} com ${descontoPercentual}% de desconto).\n\n` +
-        `Com isso, damos baixa total nas promissórias e seu cadastro fica 100% regularizado conosco.${chavePixTxt}\n\n` +
+        `Com isso, damos baixa total nas promissórias e seu cadastro fica 100% regularizado conosco.${chavePixTxt}${pixCopiaColaVista}\n\n` +
         `Essa condição é especial para regularização hoje. Posso emitir o recibo de quitação para você?`
       );
     }
@@ -310,11 +326,18 @@ export default function RenegociacaoCobranca({
     // 4. SCRIPT DE LEMBRETE CORTÊS (D-3 a D+5)
     if (tipoScript === "lembrete_cortes") {
       const vencStr = item.vencimentoMaisUrgente ? `vencida em ${dt(item.vencimentoMaisUrgente)}` : "em aberto";
+      const pixLembrete = chavePix.trim()
+        ? `\n📋 *PIX Copia e Cola (valor de ${money(saldoTotal)}):*\n\`${gerarPayloadPix({
+            chave: chavePix.trim(),
+            valor: saldoTotal,
+            txid: `VENC${item.promissorias[0]?.id || "1"}`,
+          })}\``
+        : "";
       return (
         `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim!\n\n` +
         `Passando apenas para um lembrete cortês da sua promissória na *LeoÓticas* no valor de *${money(saldoTotal)}* (${vencStr}).\n\n` +
         `Caso já tenha efetuado o pagamento, por favor desconsidere este aviso.\n` +
-        `Se precisar da chave PIX para quitar direto pelo celular com facilidade:${chavePixTxt}\n\n` +
+        `Se precisar da chave PIX para quitar direto pelo celular com facilidade:${chavePixTxt}${pixLembrete}\n\n` +
         `Se precisar de auxílio ou da 2ª via, é só responder aqui. Um abraço da equipe LeoÓticas! 👓`
       );
     }
@@ -713,8 +736,27 @@ export default function RenegociacaoCobranca({
             {/* Header do Cliente em Foco */}
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", borderBottom: "1px solid var(--line)", paddingBottom: 12, flexWrap: "wrap", gap: 10 }}>
               <div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <h2 style={{ margin: 0, fontSize: 18 }}>{clienteAtual.cliente}</h2>
+                  {(() => {
+                    const score = calcularScoreCliente(clienteAtual.promissorias);
+                    return (
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: 99,
+                          background: score.bgCor,
+                          color: score.cor,
+                          border: `1px solid ${score.cor}40`,
+                        }}
+                        title={score.recomendacaoVenda}
+                      >
+                        {score.selo}
+                      </span>
+                    );
+                  })()}
                   <button
                     type="button"
                     className="ed"
@@ -896,14 +938,14 @@ export default function RenegociacaoCobranca({
               </div>
             </div>
 
-            {/* BOTÕES DE AÇÃO: DISPARAR NO WHATSAPP / PULAR */}
-            <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4 }}>
+            {/* BOTÕES DE AÇÃO: DISPARAR NO WHATSAPP / PULAR / REPACTUAR / AGENDAR */}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4, flexWrap: "wrap" }}>
               <button
                 type="button"
                 className="btn-baixa"
                 onClick={() => handleDispararWhatsApp(clienteAtual)}
                 style={{
-                  flex: 1,
+                  flex: "1 1 200px",
                   padding: "12px 18px",
                   fontSize: 14,
                   fontWeight: 700,
@@ -922,8 +964,31 @@ export default function RenegociacaoCobranca({
               <button
                 type="button"
                 className="btn ghost"
+                onClick={() => {
+                  setPromessaValor(String(simulacao.saldoTotal));
+                  setModalPromessa(true);
+                }}
+                style={{ padding: "12px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}
+                title="Agendar promessa de pagamento para follow-up"
+              >
+                <span>📅</span> Agendar Promessa
+              </button>
+
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setModalRepactuacao(true)}
+                style={{ padding: "12px 14px", display: "inline-flex", alignItems: "center", gap: 6, color: "var(--brand)" }}
+                title="Formalizar e gravar novas parcelas no banco de dados"
+              >
+                <span>📝</span> Formalizar Acordo
+              </button>
+
+              <button
+                type="button"
+                className="btn ghost"
                 onClick={() => handlePular(clienteAtual)}
-                style={{ padding: "12px 16px" }}
+                style={{ padding: "12px 14px" }}
                 title="Pular este cliente por enquanto"
               >
                 Pular
@@ -936,6 +1001,179 @@ export default function RenegociacaoCobranca({
           </div>
         )}
       </div>
+
+      {/* Modal Agendar Promessa */}
+      {modalPromessa && clienteAtual && (
+        <div className="ov" onClick={() => setModalPromessa(false)}>
+          <div className="panel" onClick={e => e.stopPropagation()} style={{ width: "min(460px, 94vw)", height: "auto", margin: "auto", borderRadius: 14, padding: 20 }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: 18 }}>📅 Agendar Promessa de Pagamento</h2>
+            <div className="sub" style={{ marginBottom: 16 }}>
+              Anotar compromisso de pagamento para acompanhamento na data certa.
+            </div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              <div>
+                <b>Cliente:</b> {clienteAtual.cliente}
+              </div>
+              <label>
+                Data prometida:
+                <input
+                  type="date"
+                  value={promessaData}
+                  onChange={e => setPromessaData(e.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Valor prometido (R$):
+                <input
+                  type="number"
+                  step="0.01"
+                  value={promessaValor}
+                  onChange={e => setPromessaValor(e.target.value)}
+                  placeholder={String(clienteAtual.valorTotal)}
+                />
+              </label>
+              <label>
+                Observação (Ex: Salário dia do vale, pagar no PIX):
+                <input
+                  type="text"
+                  value={promessaObs}
+                  onChange={e => setPromessaObs(e.target.value)}
+                  placeholder="Ex: Vai pagar pelo PIX após as 14h"
+                />
+              </label>
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    salvarPromessaPagamento({
+                      cliente: clienteAtual.cliente,
+                      telefone: clienteAtual.telefoneOriginal,
+                      dataPromessa: promessaData,
+                      valor: Number(promessaValor) || clienteAtual.valorTotal,
+                      observacao: promessaObs,
+                    });
+                    alert(`📅 Promessa de pagamento registrada para ${dt(promessaData)}! Ela aparecerá no Dashboard na data marcada.`);
+                    setModalPromessa(false);
+                    setPromessaObs("");
+                  }}
+                  style={{ flex: 1 }}
+                >
+                  Salvar Promessa
+                </button>
+                <button
+                  type="button"
+                  className="btn ghost"
+                  onClick={() => setModalPromessa(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Formalizar Acordo no Sistema */}
+      {modalRepactuacao && clienteAtual && (
+        <div className="ov" onClick={() => !repactuando && setModalRepactuacao(false)}>
+          <div className="panel" onClick={e => e.stopPropagation()} style={{ width: "min(520px, 94vw)", height: "auto", margin: "auto", borderRadius: 14, padding: 20 }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: 18, color: "var(--brand)" }}>
+              📝 Formalizar Acordo de Repactuação
+            </h2>
+            <div className="sub" style={{ marginBottom: 14 }}>
+              As promissórias anteriores em atraso serão baixadas e novas parcelas com novas datas serão gravadas no banco de dados.
+            </div>
+
+            <div style={{ background: "var(--soft)", padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13, display: "grid", gap: 6 }}>
+              <div><b>Cliente:</b> {clienteAtual.cliente}</div>
+              <div><b>Saldo Anterior em Atraso:</b> <span style={{ color: "var(--bad)", fontWeight: 700 }}>{money(simulacao.saldoTotal)}</span> ({clienteAtual.promissorias.length} título(s))</div>
+              <div><b>Entrada Negociada:</b> <b>{money(simulacao.entradaReal)}</b></div>
+              <div><b>Novo Saldo a Parcelar:</b> <b style={{ color: "var(--brand)" }}>{money(simulacao.saldoRestante)}</b></div>
+              <div><b>Novas Parcelas:</b> <b>{parcelasQtd}x de {money(simulacao.valorParcela)}</b></div>
+            </div>
+
+            <div style={{ display: "grid", gap: 12 }}>
+              <label>
+                Data de vencimento da 1ª nova parcela:
+                <input
+                  type="date"
+                  value={primeiroVencRepactuacao}
+                  onChange={e => setPrimeiroVencRepactuacao(e.target.value)}
+                  required
+                />
+              </label>
+
+              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={repactuando}
+                  onClick={async () => {
+                    setRepactuando(true);
+                    try {
+                      // 1. Quita as promissórias antigas marcando origem
+                      for (const p of clienteAtual.promissorias) {
+                        await supabase
+                          .from("promissorias")
+                          .update({
+                            valor_pago: p.divida_total,
+                            origem: `${p.origem || "app"} | REPACTUADO_${parcelasQtd}X`,
+                          })
+                          .eq("id", p.id);
+                      }
+
+                      // 2. Insere as novas promissórias
+                      const novas = [];
+                      for (let i = 1; i <= parcelasQtd; i++) {
+                        const d = new Date(primeiroVencRepactuacao + "T00:00:00Z");
+                        d.setUTCMonth(d.getUTCMonth() + (i - 1));
+                        const vencStr = d.toISOString().slice(0, 10);
+
+                        novas.push({
+                          cliente_nome: clienteAtual.cliente,
+                          telefone: clienteAtual.telefoneOriginal,
+                          divida_total: simulacao.valorParcela,
+                          valor_pago: 0,
+                          vencimento: vencStr,
+                          parcelas: `${i}/${parcelasQtd}`,
+                          origem: `ACORDO_REPACTUADO`,
+                          fundo_perdido: false,
+                        });
+                      }
+
+                      const { error: errIns } = await supabase.from("promissorias").insert(novas);
+                      if (errIns) throw new Error(errIns.message);
+
+                      alert("✅ Acordo formalizado com sucesso no sistema! As promissórias antigas foram baixadas e as novas parcelas foram geradas com sucesso.");
+                      setModalRepactuacao(false);
+                      carregarDados();
+                    } catch (err: any) {
+                      alert("Erro ao formalizar acordo: " + (err.message || err));
+                    } finally {
+                      setRepactuando(false);
+                    }
+                  }}
+                  style={{ flex: 1, padding: "10px 14px", fontWeight: 700 }}
+                >
+                  {repactuando ? "Gravando no Banco…" : "Confirmar e Gravar Acordo"}
+                </button>
+
+                <button
+                  type="button"
+                  className="btn ghost"
+                  disabled={repactuando}
+                  onClick={() => setModalRepactuacao(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Ficha do Cliente */}
       {fichaCliente && (

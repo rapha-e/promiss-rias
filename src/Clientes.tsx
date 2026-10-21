@@ -245,14 +245,28 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
             {sortedList.map(c => (
               <tr key={c.cliente}>
                 <td className={c.vencido > 0 ? "s-NÃO" : c.saldo > 0 ? "s-PAGANDO" : "s-QUITADO"}>
-                  <button
-                    type="button"
-                    className="link-cli"
-                    title={`Ver todas as promissórias de ${c.cliente}`}
-                    onClick={() => setSel(c)}
-                  >
-                    {c.cliente}
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <button
+                      type="button"
+                      className="link-cli"
+                      title={`Ver todas as promissórias de ${c.cliente}`}
+                      onClick={() => setSel(c)}
+                    >
+                      {c.cliente}
+                    </button>
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        padding: "1px 6px",
+                        borderRadius: 99,
+                        background: c.vencido > 0 ? "rgba(180, 35, 24, 0.12)" : c.saldo > 0 ? "rgba(217, 119, 6, 0.12)" : "rgba(10, 124, 76, 0.12)",
+                        color: c.vencido > 0 ? "var(--bad)" : c.saldo > 0 ? "var(--warn)" : "var(--brand)",
+                      }}
+                    >
+                      {c.vencido > 0 ? "🔴 Risco Alto" : c.saldo > 0 ? "🟡 Regular" : "🟢 Diamante"}
+                    </span>
+                  </div>
                 </td>
                 <td className="mono">{c.telefone || "—"}</td>
                 <td className="n">{c.qtd}</td>

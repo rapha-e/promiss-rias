@@ -3,9 +3,10 @@ import type { FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
-  getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL
+  getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
+  calcularScoreCliente,
 } from "./lib";
-import type { Row } from "./lib";
+import type { Row, CreditScoreInfo } from "./lib";
 import { SortIcon } from "./SortIcon";
 
 export function Painel({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) {
@@ -41,6 +42,27 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
+
+  useEffect(() => {
+    const nome = n.trim();
+    if (nome.length < 3) {
+      setScoreCliente(null);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const { data } = await supabase
+        .from("promissorias")
+        .select("*")
+        .ilike("cliente_nome", `%${nome}%`);
+      if (data && data.length > 0) {
+        setScoreCliente(calcularScoreCliente(data as Row[]));
+      } else {
+        setScoreCliente(null);
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [n]);
 
   const T = parse(t);
   const G = parse(g);
@@ -141,6 +163,28 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
           Cliente
           <input value={n} onChange={e => setN(e.target.value)} maxLength={180} required placeholder="Nome do cliente" />
         </label>
+        {scoreCliente && (
+          <div
+            style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              background: scoreCliente.bgCor,
+              border: `1px solid ${scoreCliente.cor}40`,
+              fontSize: 12,
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <b style={{ color: scoreCliente.cor }}>Score LeoÓticas: {scoreCliente.selo}</b>
+              <span style={{ fontSize: 11, color: "var(--mut)" }}>{scoreCliente.totalTitulos} compra(s) anteriores</span>
+            </div>
+            <div style={{ color: "var(--ink)", fontWeight: 500 }}>
+              {scoreCliente.recomendacaoVenda}
+            </div>
+          </div>
+        )}
         <label>
           Telefone
           <input value={p} onChange={e => setP(mascaraTelefone(e.target.value))} inputMode="tel" maxLength={40} placeholder="(61) 99999-9999" />
@@ -447,13 +491,33 @@ export function FichaCliente({
     onChanged?.();
   };
 
+  const score = useMemo(() => calcularScoreCliente(rows), [rows]);
+
   return (
     <Painel onClose={onClose} wide>
       <div style={{ padding: 20, display: "grid", gap: 14 }}>
         <div style={{ display: "flex", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
           <div style={{ flex: 1 }}>
-            <h2 style={{ margin: 0 }}>{cliente}</h2>
-            <div className="sub mono">{tel || "Sem telefone"}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <h2 style={{ margin: 0 }}>{cliente}</h2>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  padding: "2px 8px",
+                  borderRadius: 99,
+                  background: score.bgCor,
+                  color: score.cor,
+                  border: `1px solid ${score.cor}40`,
+                }}
+                title={score.recomendacaoVenda}
+              >
+                {score.selo}
+              </span>
+            </div>
+            <div className="sub mono">
+              {tel || "Sem telefone"} · <span style={{ color: "var(--ink)", fontWeight: 500 }}>{score.recomendacaoVenda}</span>
+            </div>
           </div>
           {abertos.length > 0 && <button className="btn" onClick={() => setWhats(true)}>Cobrar por WhatsApp</button>}
           <button className="btn ghost" onClick={onClose}>Fechar</button>
