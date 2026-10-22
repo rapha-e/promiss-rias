@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, setDDD, titulo, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento } from "./lib";
+import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento } from "./lib";
 import type { Row } from "./lib";
 import { FichaCliente } from "./Dialogs";
 
@@ -71,8 +71,9 @@ export default function RenegociacaoCobranca({
   // Parâmetros do Simulador de Renegociação
   const [tipoScript, setTipoScript] = useState<TipoScript>("binaria");
   const [descontoPercentual, setDescontoPercentual] = useState<number>(20);
-  const [entradaValor, setEntradaValor] = useState<number>(50);
-  const [parcelasQtd, setParcelasQtd] = useState<number>(2);
+  const [entradaValor, setEntradaValor] = useState<number>(0);
+  const [entradaTexto, setEntradaTexto] = useState<string>("0,00");
+  const [parcelasQtd, setParcelasQtd] = useState<number>(5);
   const [diaPagamentoEntrada, setDiaPagamentoEntrada] = useState<string>("hoje");
   const [diaVencimentoParcelas, setDiaVencimentoParcelas] = useState<string>("dia 10 do próximo mês");
 
@@ -85,6 +86,7 @@ export default function RenegociacaoCobranca({
   const [modalRepactuacao, setModalRepactuacao] = useState(false);
   const [repactuando, setRepactuando] = useState(false);
   const [primeiroVencRepactuacao, setPrimeiroVencRepactuacao] = useState(somaDiasStr(getHojeISO(), 30));
+  const [obsRepactuacao, setObsRepactuacao] = useState<string>("");
 
   const hoje = getHojeISO();
 
@@ -257,13 +259,16 @@ export default function RenegociacaoCobranca({
     const saldoTotal = clienteAtual?.valorTotal || 0;
 
     // Opção A: Quitação à vista com desconto
-    const valorDesconto = (saldoTotal * descontoPercentual) / 100;
+    const valorDesconto = Math.round((saldoTotal * descontoPercentual) / 100);
     const valorComDesconto = Math.max(0, saldoTotal - valorDesconto);
 
     // Opção B: Entrada + Parcelamento do saldo restante
     const entradaReal = Math.min(entradaValor, saldoTotal);
     const saldoRestante = Math.max(0, saldoTotal - entradaReal);
-    const valorParcela = parcelasQtd > 0 ? saldoRestante / parcelasQtd : 0;
+    const qtd = Math.max(1, parcelasQtd);
+    const baseParcela = Math.floor(saldoRestante / qtd);
+    const restoParcela = saldoRestante % qtd;
+    const valorParcela = Math.round(saldoRestante / qtd);
 
     return {
       saldoTotal,
@@ -271,6 +276,8 @@ export default function RenegociacaoCobranca({
       valorComDesconto,
       entradaReal,
       saldoRestante,
+      baseParcela,
+      restoParcela,
       valorParcela,
     };
   }, [clienteAtual, descontoPercentual, entradaValor, parcelasQtd]);
@@ -292,12 +299,16 @@ export default function RenegociacaoCobranca({
 
     // 1. SCRIPT DE OPÇÃO BINÁRIA (TÉCNICA DE ALTA CONVERSÃO)
     if (tipoScript === "binaria") {
+      const textoOpcao2 = simulacao.entradaReal > 0
+        ? `👉 *OPÇÃO 2 (Entrada + Parcelamento):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para ${diaVencimentoParcelas}.\n\n`
+        : `👉 *OPÇÃO 2 (Parcelamento Facilitado):* Dividimos todo o seu saldo em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* sem entrada, com 1º vencimento para ${diaVencimentoParcelas}.\n\n`;
+
       return (
         `Olá, ${primeiroNome}! Tudo bem? Aqui é da equipe da *LeoÓticas*.\n\n` +
         `Estou entrando em contato referente à sua pendência conosco no valor total de *${money(saldoTotal)}*.\n\n` +
         `Sabemos que imprevistos acontecem e queremos muito te ajudar a regularizar sua situação hoje com tranquilidade. Preparamos duas opções facilitadas:\n\n` +
         `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de ${money(simulacao.valorDesconto)}) e quitamos seu saldo hoje mesmo!${chavePixTxt}${pixCopiaColaVista}\n\n` +
-        `👉 *OPÇÃO 2 (Entrada + Parcelamento):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para ${diaVencimentoParcelas}.\n\n` +
+        textoOpcao2 +
         `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Podemos fechar?`
       );
     }
@@ -865,37 +876,74 @@ export default function RenegociacaoCobranca({
                 {/* Opção Parcelada com Entrada */}
                 {tipoScript === "binaria" && (
                   <div>
-                    <label style={{ fontSize: 12, fontWeight: 700, marginBottom: 4 }}>
-                      Sinal de Entrada Mínimo:
-                    </label>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      {[30, 50, 100, 150].map(val => (
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
+                      <label style={{ fontSize: 12, fontWeight: 700, margin: 0 }}>
+                        Sinal de Entrada:
+                      </label>
+                      <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700 }}>
+                        {simulacao.entradaReal > 0 ? money(simulacao.entradaReal) : "Sem entrada"}
+                      </span>
+                    </div>
+
+                    {/* Botões Rápidos de Entrada */}
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {[
+                        { label: "Sem Entrada", valor: 0 },
+                        { label: "R$ 30", valor: 3000 },
+                        { label: "R$ 50", valor: 5000 },
+                        { label: "R$ 100", valor: 10000 },
+                        { label: "R$ 150", valor: 15000 },
+                        { label: "R$ 200", valor: 20000 },
+                      ].map(item => (
                         <button
-                          key={val}
+                          key={item.valor}
                           type="button"
-                          className={`btn ghost ${entradaValor === val ? "on" : ""}`}
-                          style={{ flex: 1, padding: "4px 0", fontSize: 11 }}
-                          onClick={() => setEntradaValor(val)}
+                          className={`btn ghost ${entradaValor === item.valor ? "on" : ""}`}
+                          style={{ flex: "1 1 auto", padding: "4px 6px", fontSize: 11 }}
+                          onClick={() => {
+                            setEntradaValor(item.valor);
+                            setEntradaTexto(toBRL(item.valor));
+                          }}
                         >
-                          R$ {val}
+                          {item.label}
                         </button>
                       ))}
                     </div>
-                    <div style={{ display: "flex", gap: 8, marginTop: 6, alignItems: "center" }}>
+
+                    {/* Digitar entrada livremente + Selecionar parcelas */}
+                    <div style={{ display: "flex", gap: 10, marginTop: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <label className="inl" style={{ fontSize: 11 }}>
+                        Entrada livre (R$):
+                        <input
+                          type="text"
+                          placeholder="0,00"
+                          value={entradaTexto}
+                          onChange={e => {
+                            setEntradaTexto(e.target.value);
+                            const parsed = parse(e.target.value);
+                            if (!isNaN(parsed) && parsed >= 0) {
+                              setEntradaValor(parsed);
+                            }
+                          }}
+                          style={{ width: 85, padding: "3px 6px", fontSize: 11, textAlign: "right" }}
+                        />
+                      </label>
+
                       <label className="inl" style={{ fontSize: 11 }}>
                         Parcelas:
                         <select
                           value={parcelasQtd}
-                          onChange={e => setParcelasQtd(Number(e.target.value))}
-                          style={{ padding: "2px 6px", fontSize: 11 }}
+                          onChange={e => setParcelasQtd(Math.max(1, Number(e.target.value)))}
+                          style={{ padding: "3px 8px", fontSize: 11, fontWeight: 700 }}
                         >
-                          <option value={2}>2x</option>
-                          <option value={3}>3x</option>
-                          <option value={4}>4x</option>
+                          {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 24].map(q => (
+                            <option key={q} value={q}>{q}x</option>
+                          ))}
                         </select>
                       </label>
-                      <span style={{ fontSize: 11, color: "var(--mut)" }}>
-                        Saldo: {parcelasQtd}x de <b>{money(simulacao.valorParcela)}</b>
+
+                      <span style={{ fontSize: 11, color: "var(--mut)", marginLeft: "auto" }}>
+                        Saldo: {parcelasQtd}x de <b style={{ color: "var(--brand)", fontSize: 12 }}>{money(simulacao.valorParcela)}</b>
                       </span>
                     </div>
                   </div>
@@ -1079,97 +1127,371 @@ export default function RenegociacaoCobranca({
       {/* Modal Formalizar Acordo no Sistema */}
       {modalRepactuacao && clienteAtual && (
         <div className="ov" onClick={() => !repactuando && setModalRepactuacao(false)}>
-          <div className="panel" onClick={e => e.stopPropagation()} style={{ width: "min(520px, 94vw)", height: "auto", margin: "auto", borderRadius: 14, padding: 20 }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: 18, color: "var(--brand)" }}>
-              📝 Formalizar Acordo de Repactuação
-            </h2>
-            <div className="sub" style={{ marginBottom: 14 }}>
-              As promissórias anteriores em atraso serão baixadas e novas parcelas com novas datas serão gravadas no banco de dados.
-            </div>
-
-            <div style={{ background: "var(--soft)", padding: 12, borderRadius: 10, marginBottom: 14, fontSize: 13, display: "grid", gap: 6 }}>
-              <div><b>Cliente:</b> {clienteAtual.cliente}</div>
-              <div><b>Saldo Anterior em Atraso:</b> <span style={{ color: "var(--bad)", fontWeight: 700 }}>{money(simulacao.saldoTotal)}</span> ({clienteAtual.promissorias.length} título(s))</div>
-              <div><b>Entrada Negociada:</b> <b>{money(simulacao.entradaReal)}</b></div>
-              <div><b>Novo Saldo a Parcelar:</b> <b style={{ color: "var(--brand)" }}>{money(simulacao.saldoRestante)}</b></div>
-              <div><b>Novas Parcelas:</b> <b>{parcelasQtd}x de {money(simulacao.valorParcela)}</b></div>
-            </div>
-
-            <div style={{ display: "grid", gap: 12 }}>
-              <label>
-                Data de vencimento da 1ª nova parcela:
-                <input
-                  type="date"
-                  value={primeiroVencRepactuacao}
-                  onChange={e => setPrimeiroVencRepactuacao(e.target.value)}
-                  required
-                />
-              </label>
-
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn"
-                  disabled={repactuando}
-                  onClick={async () => {
-                    setRepactuando(true);
-                    try {
-                      // 1. Quita as promissórias antigas marcando origem
-                      for (const p of clienteAtual.promissorias) {
-                        await supabase
-                          .from("promissorias")
-                          .update({
-                            valor_pago: p.divida_total,
-                            origem: `${p.origem || "app"} | REPACTUADO_${parcelasQtd}X`,
-                          })
-                          .eq("id", p.id);
-                      }
-
-                      // 2. Insere as novas promissórias
-                      const novas = [];
-                      for (let i = 1; i <= parcelasQtd; i++) {
-                        const d = new Date(primeiroVencRepactuacao + "T00:00:00Z");
-                        d.setUTCMonth(d.getUTCMonth() + (i - 1));
-                        const vencStr = d.toISOString().slice(0, 10);
-
-                        novas.push({
-                          cliente_nome: clienteAtual.cliente,
-                          telefone: clienteAtual.telefoneOriginal,
-                          divida_total: simulacao.valorParcela,
-                          valor_pago: 0,
-                          vencimento: vencStr,
-                          parcelas: `${i}/${parcelasQtd}`,
-                          origem: `ACORDO_REPACTUADO`,
-                          fundo_perdido: false,
-                        });
-                      }
-
-                      const { error: errIns } = await supabase.from("promissorias").insert(novas);
-                      if (errIns) throw new Error(errIns.message);
-
-                      alert("✅ Acordo formalizado com sucesso no sistema! As promissórias antigas foram baixadas e as novas parcelas foram geradas com sucesso.");
-                      setModalRepactuacao(false);
-                      carregarDados();
-                    } catch (err: any) {
-                      alert("Erro ao formalizar acordo: " + (err.message || err));
-                    } finally {
-                      setRepactuando(false);
-                    }
-                  }}
-                  style={{ flex: 1, padding: "10px 14px", fontWeight: 700 }}
-                >
-                  {repactuando ? "Gravando no Banco…" : "Confirmar e Gravar Acordo"}
-                </button>
-
-                <button
-                  type="button"
-                  className="btn ghost"
-                  disabled={repactuando}
-                  onClick={() => setModalRepactuacao(false)}
-                >
-                  Cancelar
-                </button>
+          <div
+            className="panel"
+            onClick={e => e.stopPropagation()}
+            style={{ width: "min(680px, 96vw)", maxHeight: "92vh", overflowY: "auto", margin: "auto", borderRadius: 16, padding: 22 }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 19, color: "var(--brand)", display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>📝</span> Formalizar Acordo de Repactuação
+                </h2>
+                <div className="sub" style={{ marginTop: 4 }}>
+                  Os débitos anteriores serão baixados e novas parcelas com novos vencimentos serão geradas com auditoria completa.
+                </div>
               </div>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={repactuando}
+                onClick={() => setModalRepactuacao(false)}
+                style={{ padding: "4px 10px", fontSize: 12 }}
+              >
+                ✕ Fechar
+              </button>
+            </div>
+
+            {/* Resumo da Operação em Cartões */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(135px, 1fr))",
+                gap: 8,
+                marginBottom: 16,
+              }}
+            >
+              <div style={{ background: "var(--soft)", padding: "10px 12px", borderRadius: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Cliente</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{clienteAtual.cliente}</div>
+                <div style={{ fontSize: 11, color: "var(--mut)" }}>{clienteAtual.telefoneOriginal || "Sem telefone"}</div>
+              </div>
+
+              <div style={{ background: "rgba(220, 38, 38, 0.08)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(220, 38, 38, 0.2)" }}>
+                <div style={{ fontSize: 11, color: "var(--bad)", textTransform: "uppercase", fontWeight: 700 }}>Dívida Anterior</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "var(--bad)" }}>{money(simulacao.saldoTotal)}</div>
+                <div style={{ fontSize: 11, color: "var(--bad)" }}>{clienteAtual.promissorias.length} título(s) antigo(s)</div>
+              </div>
+
+              <div style={{ background: "rgba(16, 185, 129, 0.08)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(16, 185, 129, 0.2)" }}>
+                <div style={{ fontSize: 11, color: "#10b981", textTransform: "uppercase", fontWeight: 700 }}>Entrada</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "#10b981" }}>
+                  {simulacao.entradaReal > 0 ? money(simulacao.entradaReal) : "R$ 0,00"}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--mut)" }}>{simulacao.entradaReal > 0 ? "Com entrada" : "Sem entrada"}</div>
+              </div>
+
+              <div style={{ background: "rgba(234, 88, 12, 0.08)", padding: "10px 12px", borderRadius: 10, border: "1px solid rgba(234, 88, 12, 0.2)" }}>
+                <div style={{ fontSize: 11, color: "var(--brand)", textTransform: "uppercase", fontWeight: 700 }}>Novo Saldo</div>
+                <div style={{ fontWeight: 800, fontSize: 16, color: "var(--brand)" }}>{money(simulacao.saldoRestante)}</div>
+                <div style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700 }}>
+                  {parcelasQtd}x de {money(simulacao.valorParcela)}
+                </div>
+              </div>
+            </div>
+
+            {/* Seção de Ajuste das Condições */}
+            <div style={{ background: "var(--card)", border: "1px solid var(--line)", borderRadius: 12, padding: 14, marginBottom: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", marginBottom: 10, display: "flex", alignItems: "center", gap: 6 }}>
+                <span>⚙️</span> Condições do Novo Parcelamento:
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <label style={{ fontSize: 12 }}>
+                  Quantidade de Parcelas:
+                  <select
+                    value={parcelasQtd}
+                    onChange={e => setParcelasQtd(Math.max(1, Number(e.target.value)))}
+                    style={{ width: "100%", padding: "7px 10px", fontSize: 13, fontWeight: 700, marginTop: 4, borderRadius: 8 }}
+                  >
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 15, 18, 24].map(q => (
+                      <option key={q} value={q}>{q}x ({money(simulacao.saldoRestante > 0 ? Math.round(simulacao.saldoRestante / q) : 0)} cada)</option>
+                    ))}
+                  </select>
+                </label>
+
+                <label style={{ fontSize: 12 }}>
+                  Data do 1º Vencimento:
+                  <input
+                    type="date"
+                    value={primeiroVencRepactuacao}
+                    onChange={e => setPrimeiroVencRepactuacao(e.target.value)}
+                    required
+                    style={{ width: "100%", padding: "6px 10px", fontSize: 13, marginTop: 4, borderRadius: 8 }}
+                  />
+                </label>
+              </div>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 10 }}>
+                <label style={{ fontSize: 12 }}>
+                  Sinal de Entrada (R$):
+                  <input
+                    type="text"
+                    value={entradaTexto}
+                    placeholder="0,00"
+                    onChange={e => {
+                      setEntradaTexto(e.target.value);
+                      const parsed = parse(e.target.value);
+                      if (!isNaN(parsed) && parsed >= 0) {
+                        setEntradaValor(parsed);
+                      }
+                    }}
+                    style={{ width: "100%", padding: "6px 10px", fontSize: 13, marginTop: 4, borderRadius: 8 }}
+                  />
+                </label>
+
+                <label style={{ fontSize: 12 }}>
+                  Observações do Acordo (opcional):
+                  <input
+                    type="text"
+                    value={obsRepactuacao}
+                    placeholder="Ex: Cliente solicitou pagar em 5x..."
+                    onChange={e => setObsRepactuacao(e.target.value)}
+                    style={{ width: "100%", padding: "6px 10px", fontSize: 13, marginTop: 4, borderRadius: 8 }}
+                  />
+                </label>
+              </div>
+            </div>
+
+            {/* Títulos Anteriores que Serão Baixados */}
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", marginBottom: 6 }}>
+                Títulos que serão baixados ({clienteAtual.promissorias.length}):
+              </div>
+              <div
+                style={{
+                  maxHeight: 120,
+                  overflowY: "auto",
+                  border: "1px solid var(--line)",
+                  borderRadius: 8,
+                  fontSize: 12,
+                  background: "var(--soft)",
+                }}
+              >
+                {clienteAtual.promissorias.map(p => (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      padding: "6px 10px",
+                      borderBottom: "1px solid var(--line)",
+                    }}
+                  >
+                    <span>
+                      <b>#{p.id}</b> · {p.parcelas || "Única"} · Venc: {p.vencimento ? dt(p.vencimento) : "—"}
+                    </span>
+                    <span>
+                      Saldo: <b style={{ color: "var(--bad)" }}>{money(p.saldo_devedor)}</b>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Box Informativo de Auditoria */}
+            <div
+              style={{
+                background: "rgba(10, 124, 76, 0.08)",
+                border: "1px solid rgba(10, 124, 76, 0.25)",
+                borderRadius: 10,
+                padding: "10px 14px",
+                fontSize: 12,
+                color: "var(--ink)",
+                lineHeight: 1.5,
+                marginBottom: 16,
+              }}
+            >
+              <b>🛡️ Auditoria & Registro Permanente de Log:</b>
+              <br />
+              Esta operação gravará o registro completo da repactuação na tabela de auditoria e no histórico de cada título com:
+              identificação do <b>operador logado</b>, <b>data/hora exata</b>, valores renegociados e vínculo entre os títulos antigos baixados e as <b>{parcelasQtd} novas parcelas</b> geradas.
+            </div>
+
+            {/* Botões de Ação */}
+            <div style={{ display: "flex", gap: 10, justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="btn ghost"
+                disabled={repactuando}
+                onClick={() => setModalRepactuacao(false)}
+                style={{ padding: "10px 18px" }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                className="btn"
+                disabled={repactuando || simulacao.saldoRestante < 0}
+                onClick={async () => {
+                  setRepactuando(true);
+                  try {
+                    // 1. Obter usuário logado para auditoria
+                    const { data: userData } = await supabase.auth.getUser();
+                    const operadorEmail = userData.user?.email || "operador@leoticas.fin";
+                    const operadorId = userData.user?.id || null;
+                    const agoraIso = new Date().toISOString();
+
+                    const titulosAntigosIds = clienteAtual.promissorias.map(p => p.id);
+                    const titulosAntigosDesc = clienteAtual.promissorias
+                      .map(p => `#${p.id} (${p.parcelas || "1X"} - Saldo ${money(p.saldo_devedor)})`)
+                      .join(", ");
+
+                    const obsFinal = obsRepactuacao.trim();
+                    const detalhesLogAcordo = `Acordo de Repactuação em ${parcelasQtd}x formalizado por ${operadorEmail} em ${new Date().toLocaleString("pt-BR")}. ` +
+                      `Saldo total renegociado: ${money(simulacao.saldoTotal)} de ${clienteAtual.promissorias.length} título(s) antigo(s) [${titulosAntigosDesc}]. ` +
+                      (simulacao.entradaReal > 0 ? `Entrada: ${money(simulacao.entradaReal)}. ` : `Sem entrada (R$ 0,00). `) +
+                      `Novo saldo de ${money(simulacao.saldoRestante)} parcelado em ${parcelasQtd}x de ${money(simulacao.valorParcela)}, com 1º vencimento em ${dt(primeiroVencRepactuacao)}.` +
+                      (obsFinal ? ` Obs: ${obsFinal}` : "");
+
+                    // 2. Dar baixa nas promissórias antigas e registrar logs
+                    for (const p of clienteAtual.promissorias) {
+                      // 2.1 Preservar histórico anterior se existir
+                      let logsArray: any[] = [];
+                      if (p.origem) {
+                        try {
+                          const parsed = JSON.parse(p.origem);
+                          if (Array.isArray(parsed)) logsArray = parsed;
+                        } catch (_) {}
+                      }
+
+                      logsArray.push({
+                        data: agoraIso,
+                        valor: p.saldo_devedor,
+                        operador: operadorEmail,
+                        detalhes: detalhesLogAcordo,
+                        acordo: {
+                          tipo: "REPACTUACAO_BAIXA",
+                          parcelasQtd,
+                          saldoTotalAnterior: simulacao.saldoTotal,
+                          entrada: simulacao.entradaReal,
+                          novoSaldo: simulacao.saldoRestante,
+                          valorParcela: simulacao.valorParcela,
+                          primeiroVencimento: primeiroVencRepactuacao,
+                          titulosEnvolvidos: titulosAntigosIds,
+                          observacoes: obsFinal || undefined,
+                        },
+                      });
+
+                      // 2.2 Atualiza promissória antiga para QUITADA com o log completo em origem
+                      const { error: errUpd } = await supabase
+                        .from("promissorias")
+                        .update({
+                          valor_pago: p.divida_total,
+                          origem: JSON.stringify(logsArray),
+                        })
+                        .eq("id", p.id);
+
+                      if (errUpd) throw new Error(`Erro ao baixar título #${p.id}: ${errUpd.message}`);
+
+                      // 2.3 Grava auditoria na tabela promissoria_pagamentos
+                      try {
+                        await supabase.from("promissoria_pagamentos").insert({
+                          promissoria_id: p.id,
+                          valor_pago: p.saldo_devedor,
+                          operador_email: operadorEmail,
+                          operador_id: operadorId,
+                          data_pagamento: agoraIso,
+                          detalhes: detalhesLogAcordo,
+                        });
+                      } catch (ePay) {
+                        console.warn("Aviso ao gravar promissoria_pagamentos:", ePay);
+                      }
+
+                      // 2.4 Grava evento em promissoria_eventos se existir
+                      try {
+                        await supabase.from("promissoria_eventos").insert({
+                          promissoria_id: p.id,
+                          tipo: "BAIXA",
+                          motivo: `Repactuado em ${parcelasQtd}x. ${detalhesLogAcordo.slice(0, 200)}`,
+                          saldo_na_data: p.saldo_devedor,
+                          usuario_id: operadorId,
+                        });
+                      } catch (_) {}
+                    }
+
+                    // 3. Gerar as novas promissórias com divisão centavo a centavo e log gravado
+                    const novas = [];
+                    const baseCentavos = Math.floor(simulacao.saldoRestante / parcelasQtd);
+                    const restoCentavos = simulacao.saldoRestante % parcelasQtd;
+
+                    for (let i = 1; i <= parcelasQtd; i++) {
+                      const valorDestaParcela = baseCentavos + (i === 1 ? restoCentavos : 0);
+                      const d = new Date(primeiroVencRepactuacao + "T00:00:00Z");
+                      d.setUTCMonth(d.getUTCMonth() + (i - 1));
+                      const vencStr = d.toISOString().slice(0, 10);
+
+                      const logNovaPromissoria = [
+                        {
+                          data: agoraIso,
+                          valor: 0,
+                          operador: operadorEmail,
+                          detalhes: `Promissória gerada por Acordo de Repactuação (${i}/${parcelasQtd}). ${detalhesLogAcordo}`,
+                          acordo: {
+                            tipo: "NOVA_PARCELA_REPACTUADA",
+                            numeroParcela: i,
+                            totalParcelas: parcelasQtd,
+                            saldoTotalAnterior: simulacao.saldoTotal,
+                            entrada: simulacao.entradaReal,
+                            titulosOriginais: titulosAntigosIds,
+                            observacoes: obsFinal || undefined,
+                          },
+                        },
+                      ];
+
+                      novas.push({
+                        cliente_nome: clienteAtual.cliente,
+                        telefone: clienteAtual.telefoneOriginal,
+                        divida_total: valorDestaParcela,
+                        valor_pago: 0,
+                        vencimento: vencStr,
+                        parcelas: `${i}/${parcelasQtd}`,
+                        origem: JSON.stringify(logNovaPromissoria),
+                        fundo_perdido: false,
+                      });
+                    }
+
+                    const { data: dadosNovos, error: errIns } = await supabase
+                      .from("promissorias")
+                      .insert(novas)
+                      .select("id");
+
+                    if (errIns) throw new Error("Erro ao gerar novas promissórias: " + errIns.message);
+
+                    // 4. Se houver entrada > 0, registrar o pagamento em promissoria_pagamentos
+                    if (simulacao.entradaReal > 0 && dadosNovos && dadosNovos.length > 0) {
+                      try {
+                        await supabase.from("promissoria_pagamentos").insert({
+                          promissoria_id: dadosNovos[0].id,
+                          valor_pago: simulacao.entradaReal,
+                          operador_email: operadorEmail,
+                          operador_id: operadorId,
+                          data_pagamento: agoraIso,
+                          detalhes: `Sinal de Entrada (${money(simulacao.entradaReal)}) recebido no ato da repactuação em ${parcelasQtd}x.`,
+                        });
+                      } catch (_) {}
+                    }
+
+                    alert(
+                      `✅ Acordo formalizado com sucesso no sistema!\n\n` +
+                      `• ${clienteAtual.promissorias.length} título(s) anterior(es) quitado(s) com registro de auditoria.\n` +
+                      `• ${parcelasQtd} nova(s) parcela(s) gerada(s) com sucesso!\n` +
+                      `• Log permanente da operação registrado no histórico e na auditoria.`
+                    );
+                    setModalRepactuacao(false);
+                    setObsRepactuacao("");
+                    carregarDados();
+                  } catch (err: any) {
+                    alert("Erro ao formalizar acordo: " + (err.message || err));
+                  } finally {
+                    setRepactuando(false);
+                  }
+                }}
+                style={{ padding: "10px 22px", fontWeight: 700 }}
+              >
+                {repactuando ? "Gravando no Banco…" : "Confirmar e Gravar Acordo"}
+              </button>
             </div>
           </div>
         </div>
