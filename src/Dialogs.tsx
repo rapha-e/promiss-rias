@@ -1224,8 +1224,7 @@ export function BaixaDialog({
   const [outras, setOutras] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [selecionadas, setSelecionadas] = useState<Set<number>>(new Set());
-  const [recalcular, setRecalcular] = useState(true);
-  const [opcaoSemRestantes, setOpcaoSemRestantes] = useState<"abater" | "quitar">("abater");
+  const [modoDiferenca, setModoDiferenca] = useState<"abater_padrao" | "ratear" | "quitar_desconto">("abater_padrao");
   const [comprovante, setComprovante] = useState<{
     mensagem: string;
     telefone: string;
@@ -1297,28 +1296,29 @@ export function BaixaDialog({
 
   const V = parse(valorStr);
   const ok = !isNaN(V) && V >= 0;
+  const isDiferente = ok && V !== row.saldo_devedor;
 
   const parcelasRateio = useMemo(
     () => outras.filter(r => selecionadas.has(r.id)),
     [outras, selecionadas]
   );
 
-  const temRateio = recalcular && parcelasRateio.length > 0;
+  const temRateio = isDiferente && modoDiferenca === "ratear" && parcelasRateio.length > 0;
 
-  // Saldo devedor total somando a promissória atual + as promissórias selecionadas
+  // Saldo devedor total em aberto do cliente somando a promissória atual + todas as outras
   const saldoTotalGrupo = useMemo(() => {
-    return row.saldo_devedor + (temRateio ? parcelasRateio.reduce((acc, r) => acc + r.saldo_devedor, 0) : 0);
-  }, [row.saldo_devedor, temRateio, parcelasRateio]);
+    return row.saldo_devedor + outras.reduce((acc, r) => acc + r.saldo_devedor, 0);
+  }, [row.saldo_devedor, outras]);
 
-  // Saldo que restará para dividir após o pagamento atual
-  const saldoRestante = Math.max(0, saldoTotalGrupo - (ok ? V : 0));
+  // Saldo que restará para dividir após o pagamento atual (no caso de rateio)
+  const saldoRestanteRateio = Math.max(0, (row.saldo_devedor + parcelasRateio.reduce((acc, r) => acc + r.saldo_devedor, 0)) - (ok ? V : 0));
 
-  // Simulação do novo valor para cada promissória restante
+  // Simulação do novo valor para cada promissória restante no caso de rateio
   const simulacao = useMemo(() => {
     if (!temRateio || !ok || parcelasRateio.length === 0) return [];
     const k = parcelasRateio.length;
-    const base = Math.floor(saldoRestante / k);
-    const resto = saldoRestante % k;
+    const base = Math.floor(saldoRestanteRateio / k);
+    const resto = saldoRestanteRateio % k;
 
     return parcelasRateio.map((item, idx) => {
       const novoSaldo = base + (idx === 0 ? resto : 0);
@@ -1329,7 +1329,36 @@ export function BaixaDialog({
         diferenca: novoSaldo - item.saldo_devedor,
       };
     });
-  }, [temRateio, ok, parcelasRateio, saldoRestante]);
+  }, [temRateio, ok, parcelasRateio, saldoRestanteRateio]);
+
+  // Simulação do cascateamento de abate das próximas parcelas (quando V > row.saldo_devedor no modo sem recalcular)
+  const simulacaoAbateCascata = useMemo(() => {
+    if (!ok || V <= row.saldo_devedor || outras.length === 0) return [];
+    let excedente = V - row.saldo_devedor;
+
+    return outras.map(p => {
+      if (excedente <= 0) {
+        return {
+          ...p,
+          valorAbatido: 0,
+          novoValorPago: p.valor_pago,
+          novoSaldo: p.saldo_devedor,
+          quitada: false,
+        };
+      }
+      const amortizar = Math.min(excedente, p.saldo_devedor);
+      excedente -= amortizar;
+      const novoValorPago = p.valor_pago + amortizar;
+      const novoSaldo = p.saldo_devedor - amortizar;
+      return {
+        ...p,
+        valorAbatido: amortizar,
+        novoValorPago,
+        novoSaldo,
+        quitada: novoSaldo === 0,
+      };
+    });
+  }, [ok, V, row.saldo_devedor, outras]);
 
   function toggleSelecionada(id: number) {
     setSelecionadas(prev => {
@@ -1358,27 +1387,20 @@ export function BaixaDialog({
       const operadorId = userData.user?.id || null;
       const agoraIso = new Date().toISOString();
 
-      const detalhesOp = temRateio
-        ? `Baixa quitada com recálculo e rateio de ${money(saldoRestante)} em ${parcelasRateio.length} parcela(s) restante(s).`
-        : (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar"
-          ? `Quitação com desconto concedido (pago ${money(V)} de saldo ${money(row.saldo_devedor)}).`
-          : (V < row.saldo_devedor
-            ? `Abate parcial de ${money(V)}. Saldo restante: ${money(row.saldo_devedor - V)}.`
-            : `Quitação integral no valor de ${money(V)}.`));
+      let detalhesOp = "";
+      if (temRateio) {
+        detalhesOp = `Baixa com recálculo e rateio de saldo de ${money(saldoRestanteRateio)} em ${parcelasRateio.length} parcela(s) restante(s).`;
+      } else if (modoDiferenca === "quitar_desconto") {
+        detalhesOp = `Quitação com desconto concedido (pago ${money(V)} de saldo ${money(row.saldo_devedor)}). Desconto: ${money(row.saldo_devedor - V)}.`;
+      } else if (V < row.saldo_devedor) {
+        detalhesOp = `Abate parcial de ${money(V)} (sem recalcular). Saldo restante da parcela: ${money(row.saldo_devedor - V)}.`;
+      } else if (V > row.saldo_devedor) {
+        detalhesOp = `Quitação integral com excedente de ${money(V - row.saldo_devedor)} abatido nas próximas parcelas (sem recalcular).`;
+      } else {
+        detalhesOp = `Quitação integral no valor de ${money(V)}.`;
+      }
 
-      // 1. Tentar gravar na tabela dedicada promissoria_pagamentos
-      try {
-        await supabase.from("promissoria_pagamentos").insert({
-          promissoria_id: row.id,
-          valor_pago: V,
-          operador_email: operadorEmail,
-          operador_id: operadorId,
-          data_pagamento: agoraIso,
-          detalhes: detalhesOp,
-        });
-      } catch (_) {}
-
-      // 2. Preparar array de logs serializado para salvar em origem como redundância imediata
+      // Preparar array de logs serializado para salvar em origem da promissória atual
       let logsArray: any[] = [];
       if (row.origem) {
         try {
@@ -1394,8 +1416,21 @@ export function BaixaDialog({
       });
       const origemComLogs = JSON.stringify(logsArray);
 
+      // 1. Tentar gravar na tabela dedicada promissoria_pagamentos para a parcela atual
+      const valorPagoNestaPromissoria = Math.min(V, row.saldo_devedor);
+      try {
+        await supabase.from("promissoria_pagamentos").insert({
+          promissoria_id: row.id,
+          valor_pago: (modoDiferenca === "abater_padrao" && V > row.saldo_devedor) ? valorPagoNestaPromissoria : V,
+          operador_email: operadorEmail,
+          operador_id: operadorId,
+          data_pagamento: agoraIso,
+          detalhes: detalhesOp,
+        });
+      } catch (_) {}
+
       if (temRateio) {
-        // 1. Quitar a promissória atual com o valor recebido nesta baixa
+        // Quitar a promissória atual com o valor recebido nesta baixa
         const novaDividaAtual = row.valor_pago + V;
         const { error: errAtual } = await supabase
           .from("promissorias")
@@ -1408,7 +1443,7 @@ export function BaixaDialog({
 
         if (errAtual) throw new Error("Erro ao baixar promissória: " + errAtual.message);
 
-        // 2. Atualizar cada uma das promissórias restantes com o novo valor recalculado
+        // Atualizar cada uma das promissórias restantes com o novo valor recalculado
         for (const item of simulacao) {
           const novaDivida = item.valor_pago + item.novoSaldo;
           const { error: errFilha } = await supabase
@@ -1420,52 +1455,129 @@ export function BaixaDialog({
 
           if (errFilha) throw new Error(`Erro ao atualizar parcela ${item.parcelas}: ` + errFilha.message);
         }
-      } else {
-        // Baixa individual sem rateio
-        if (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar") {
-          // Quitação total com desconto
-          const novaDivida = row.valor_pago + V;
-          const { error } = await supabase
-            .from("promissorias")
-            .update({
-              divida_total: novaDivida,
-              valor_pago: novaDivida,
-              origem: origemComLogs,
-            })
-            .eq("id", row.id);
-          if (error) throw new Error(error.message);
-        } else {
-          // Abate de valor
-          const novoPago = row.valor_pago + V;
-          const { error } = await supabase
-            .from("promissorias")
-            .update({
-              valor_pago: novoPago,
-              origem: origemComLogs,
-            })
-            .eq("id", row.id);
-          if (error) throw new Error(error.message);
+      } else if (modoDiferenca === "quitar_desconto") {
+        // Quitação com desconto: ajusta divida_total para igualar ao valor já pago + V
+        const novaDivida = row.valor_pago + V;
+        const { error } = await supabase
+          .from("promissorias")
+          .update({
+            divida_total: novaDivida,
+            valor_pago: novaDivida,
+            origem: origemComLogs,
+          })
+          .eq("id", row.id);
+        if (error) throw new Error(error.message);
+      } else if (modoDiferenca === "abater_padrao" && V > row.saldo_devedor) {
+        // Excedente abatido nas próximas parcelas (SEM RECALCULAR)
+        // 1. Quitar integralmente a promissória atual
+        const novoPagoAtual = row.divida_total;
+        const { error: errAtual } = await supabase
+          .from("promissorias")
+          .update({
+            valor_pago: novoPagoAtual,
+            origem: origemComLogs,
+          })
+          .eq("id", row.id);
+        if (errAtual) throw new Error(errAtual.message);
+
+        // 2. Abater das próximas parcelas por ordem cronológica (sem alterar divida_total)
+        for (const item of simulacaoAbateCascata) {
+          if (item.valorAbatido > 0) {
+            let logsFilha: any[] = [];
+            if (item.origem) {
+              try {
+                const parsed = JSON.parse(item.origem);
+                if (Array.isArray(parsed)) logsFilha = parsed;
+              } catch (_) {}
+            }
+            const detalheItem = `Abate de excedente (${money(item.valorAbatido)}) recebido junto da parcela ${parcelaIdentificador || row.parcelas}. Saldo restante: ${money(item.novoSaldo)}.`;
+            logsFilha.push({
+              data: agoraIso,
+              valor: item.valorAbatido,
+              operador: operadorEmail,
+              detalhes: detalheItem,
+            });
+
+            const { error: errFilha } = await supabase
+              .from("promissorias")
+              .update({
+                valor_pago: item.novoValorPago,
+                origem: JSON.stringify(logsFilha),
+              })
+              .eq("id", item.id);
+            if (errFilha) throw new Error(`Erro ao abater da parcela ${item.parcelas}: ` + errFilha.message);
+
+            try {
+              await supabase.from("promissoria_pagamentos").insert({
+                promissoria_id: item.id,
+                valor_pago: item.valorAbatido,
+                operador_email: operadorEmail,
+                operador_id: operadorId,
+                data_pagamento: agoraIso,
+                detalhes: detalheItem,
+              });
+            } catch (_) {}
+          }
         }
+      } else {
+        // Abate parcial da parcela atual (sem recalcular) ou quitação com valor exato
+        const novoPago = row.valor_pago + V;
+        const { error } = await supabase
+          .from("promissorias")
+          .update({
+            valor_pago: novoPago,
+            origem: origemComLogs,
+          })
+          .eq("id", row.id);
+        if (error) throw new Error(error.message);
       }
 
       // Calcular saldo restante e gerar mensagem de comprovante para o WhatsApp
-      const saldoOutrasAbertas = outras.reduce((acc, r) => acc + r.saldo_devedor, 0);
-      const saldoDestaRestante = Math.max(0, row.saldo_devedor - V);
+      let valorRestanteFinal = 0;
+      let proximasParcelasInfo: { parcela: string; valor: number; vencimento?: string }[] | undefined = undefined;
 
-      const valorRestanteFinal = temRateio
-        ? saldoRestante
-        : (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar"
-          ? 0
-          : saldoDestaRestante + saldoOutrasAbertas);
+      if (temRateio) {
+        valorRestanteFinal = saldoRestanteRateio;
+        if (saldoRestanteRateio > 0) {
+          proximasParcelasInfo = simulacao.map(item => ({
+            parcela: item.parcelas,
+            valor: item.novoSaldo,
+            vencimento: item.vencimento,
+          }));
+        }
+      } else if (modoDiferenca === "quitar_desconto") {
+        valorRestanteFinal = outras.reduce((acc, r) => acc + r.saldo_devedor, 0);
+        if (valorRestanteFinal > 0) {
+          proximasParcelasInfo = outras.map(r => ({
+            parcela: r.parcelas,
+            valor: r.saldo_devedor,
+            vencimento: r.vencimento,
+          }));
+        }
+      } else if (modoDiferenca === "abater_padrao" && V > row.saldo_devedor) {
+        valorRestanteFinal = simulacaoAbateCascata.reduce((acc, r) => acc + r.novoSaldo, 0);
+        if (valorRestanteFinal > 0) {
+          proximasParcelasInfo = simulacaoAbateCascata
+            .filter(r => r.novoSaldo > 0)
+            .map(r => ({
+              parcela: r.parcelas,
+              valor: r.novoSaldo,
+              vencimento: r.vencimento,
+            }));
+        }
+      } else {
+        // V <= row.saldo_devedor (abate parcial na própria parcela atual ou quitação exata)
+        const saldoDestaRestante = Math.max(0, row.saldo_devedor - V);
+        const saldoOutrasAbertas = outras.reduce((acc, r) => acc + r.saldo_devedor, 0);
+        valorRestanteFinal = saldoDestaRestante + saldoOutrasAbertas;
 
-      const proximasParcelasInfo = temRateio && saldoRestante > 0
-        ? simulacao.map(item => ({ parcela: item.parcelas, valor: item.novoSaldo, vencimento: item.vencimento }))
-        : (valorRestanteFinal > 0 && outras.length > 0
-          ? [
-              ...(saldoDestaRestante > 0 ? [{ parcela: row.parcelas, valor: saldoDestaRestante, vencimento: row.vencimento }] : []),
-              ...outras.map(item => ({ parcela: item.parcelas, valor: item.saldo_devedor, vencimento: item.vencimento }))
-            ]
-          : (saldoDestaRestante > 0 ? [{ parcela: row.parcelas, valor: saldoDestaRestante, vencimento: row.vencimento }] : undefined));
+        if (valorRestanteFinal > 0) {
+          proximasParcelasInfo = [
+            ...(saldoDestaRestante > 0 ? [{ parcela: parcelaIdentificador || row.parcelas, valor: saldoDestaRestante, vencimento: row.vencimento }] : []),
+            ...outras.map(r => ({ parcela: r.parcelas, valor: r.saldo_devedor, vencimento: r.vencimento })),
+          ];
+        }
+      }
 
       const textoComprovante = mensagemComprovanteBaixa({
         nome: row.cliente_nome,
@@ -1623,8 +1735,6 @@ export function BaixaDialog({
     );
   }
 
-  const isDiferente = ok && V !== row.saldo_devedor;
-
   return (
     <Painel onClose={onClose} wide={temRateio}>
       <form onSubmit={submit} autoComplete="off">
@@ -1688,20 +1798,274 @@ export function BaixaDialog({
 
         {loading ? (
           <div className="sub" style={{ padding: 10 }}>Buscando outras promissórias do cliente…</div>
-        ) : outras.length > 0 ? (
-          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid", gap: 10 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontSize: 14, fontWeight: 600, color: "var(--ink)" }}>
-              <input
-                type="checkbox"
-                checked={recalcular}
-                onChange={e => setRecalcular(e.target.checked)}
-                style={{ width: 18, height: 18, accentColor: "#15803d" }}
-              />
-              Recalcular e ratear o saldo restante nas demais promissórias ({outras.length} em aberto)
-            </label>
+        ) : (
+          <div style={{ borderTop: "1px solid var(--line)", paddingTop: 12, display: "grid", gap: 12 }}>
+            {/* Caso 1: Valor menor que o saldo devedor da parcela */}
+            {isDiferente && V < row.saldo_devedor && (
+              <div
+                style={{
+                  background: "var(--soft)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", display: "flex", justifyContent: "space-between" }}>
+                  <span>Pagamento menor que a parcela</span>
+                  <span className="mono" style={{ color: "var(--bad)" }}>Faltam {money(row.saldo_devedor - V)}</span>
+                </div>
 
-            {recalcular && (
-              <>
+                <div style={{ display: "grid", gap: 8 }}>
+                  {/* Opção Padrão: Abater e manter saldo em aberto na parcela atual sem recalcular */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      cursor: "pointer",
+                      padding: "8px 10px",
+                      background: modoDiferenca === "abater_padrao" ? "var(--card)" : "transparent",
+                      border: modoDiferenca === "abater_padrao" ? "1px solid #15803d" : "1px solid transparent",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="modoDiferencaMenor"
+                      checked={modoDiferenca === "abater_padrao"}
+                      onChange={() => setModoDiferenca("abater_padrao")}
+                      style={{ marginTop: 2, accentColor: "#15803d" }}
+                    />
+                    <div style={{ fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, color: "var(--ink)" }}>
+                        Abater desta parcela (Sem recalcular) <span className="pill" style={{ fontSize: 10, padding: "1px 6px", background: "#15803d15", color: "#15803d", borderColor: "#15803d" }}>Padrão</span>
+                      </div>
+                      <div className="sub" style={{ marginTop: 2 }}>
+                        Registra o pagamento de <b>{money(V)}</b>. A parcela atual continuará constando em aberto com saldo de <b>{money(row.saldo_devedor - V)}</b>. As demais parcelas permanecem inalteradas.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Opção 2: Quitar com desconto */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      cursor: "pointer",
+                      padding: "8px 10px",
+                      background: modoDiferenca === "quitar_desconto" ? "var(--card)" : "transparent",
+                      border: modoDiferenca === "quitar_desconto" ? "1px solid var(--brand)" : "1px solid transparent",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="modoDiferencaMenor"
+                      checked={modoDiferenca === "quitar_desconto"}
+                      onChange={() => setModoDiferenca("quitar_desconto")}
+                      style={{ marginTop: 2, accentColor: "var(--brand)" }}
+                    />
+                    <div style={{ fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, color: "var(--ink)" }}>
+                        Quitar parcela com desconto concedido
+                      </div>
+                      <div className="sub" style={{ marginTop: 2 }}>
+                        Dá a parcela atual como 100% quitada concedendo um desconto de <b>{money(row.saldo_devedor - V)}</b>.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Opção 3: Ratear nas outras parcelas (se houver outras) */}
+                  {outras.length > 0 && (
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        cursor: "pointer",
+                        padding: "8px 10px",
+                        background: modoDiferenca === "ratear" ? "var(--card)" : "transparent",
+                        border: modoDiferenca === "ratear" ? "1px solid var(--brand)" : "1px solid transparent",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="modoDiferencaMenor"
+                        checked={modoDiferenca === "ratear"}
+                        onChange={() => setModoDiferenca("ratear")}
+                        style={{ marginTop: 2, accentColor: "var(--brand)" }}
+                      />
+                      <div style={{ fontSize: 13 }}>
+                        <div style={{ fontWeight: 700, color: "var(--ink)" }}>
+                          Recalcular e ratear o saldo restante nas demais promissórias ({outras.length} em aberto)
+                        </div>
+                        <div className="sub" style={{ marginTop: 2 }}>
+                          Quita a parcela atual e redistribui a diferença de <b>{money(row.saldo_devedor - V)}</b> aumentando o saldo das parcelas seguintes.
+                        </div>
+                      </div>
+                    </label>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Caso 2: Valor maior que o saldo devedor da parcela */}
+            {isDiferente && V > row.saldo_devedor && (
+              <div
+                style={{
+                  background: "var(--soft)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", display: "flex", justifyContent: "space-between" }}>
+                  <span>Pagamento maior que a parcela</span>
+                  <span className="mono" style={{ color: "#15803d" }}>Excedente de +{money(V - row.saldo_devedor)}</span>
+                </div>
+
+                <div style={{ display: "grid", gap: 8 }}>
+                  {/* Opção Padrão: Abater das próximas parcelas sem recalcular */}
+                  <label
+                    style={{
+                      display: "flex",
+                      alignItems: "flex-start",
+                      gap: 8,
+                      cursor: "pointer",
+                      padding: "8px 10px",
+                      background: modoDiferenca === "abater_padrao" ? "var(--card)" : "transparent",
+                      border: modoDiferenca === "abater_padrao" ? "1px solid #15803d" : "1px solid transparent",
+                      borderRadius: 8,
+                    }}
+                  >
+                    <input
+                      type="radio"
+                      name="modoDiferencaMaior"
+                      checked={modoDiferenca === "abater_padrao"}
+                      onChange={() => setModoDiferenca("abater_padrao")}
+                      style={{ marginTop: 2, accentColor: "#15803d" }}
+                    />
+                    <div style={{ fontSize: 13 }}>
+                      <div style={{ fontWeight: 700, color: "var(--ink)" }}>
+                        Abater das próximas parcelas (Sem recalcular) <span className="pill" style={{ fontSize: 10, padding: "1px 6px", background: "#15803d15", color: "#15803d", borderColor: "#15803d" }}>Padrão</span>
+                      </div>
+                      <div className="sub" style={{ marginTop: 2 }}>
+                        Quita esta parcela e abate o excedente de <b>{money(V - row.saldo_devedor)}</b> diretamente nas próximas parcelas por ordem cronológica, sem alterar os valores do carnê.
+                      </div>
+                    </div>
+                  </label>
+
+                  {/* Opção 2: Ratear nas outras parcelas (se houver outras) */}
+                  {outras.length > 0 && (
+                    <label
+                      style={{
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 8,
+                        cursor: "pointer",
+                        padding: "8px 10px",
+                        background: modoDiferenca === "ratear" ? "var(--card)" : "transparent",
+                        border: modoDiferenca === "ratear" ? "1px solid var(--brand)" : "1px solid transparent",
+                        borderRadius: 8,
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="modoDiferencaMaior"
+                        checked={modoDiferenca === "ratear"}
+                        onChange={() => setModoDiferenca("ratear")}
+                        style={{ marginTop: 2, accentColor: "var(--brand)" }}
+                      />
+                      <div style={{ fontSize: 13 }}>
+                        <div style={{ fontWeight: 700, color: "var(--ink)" }}>
+                          Recalcular e ratear entre as parcelas restantes ({outras.length} em aberto)
+                        </div>
+                        <div className="sub" style={{ marginTop: 2 }}>
+                          Quita esta parcela e recalcula as próximas parcelas diminuindo o valor nominal delas igualmente.
+                        </div>
+                      </div>
+                    </label>
+                  )}
+                </div>
+
+                {/* Prévia do abate cascata nas próximas parcelas quando modoDiferenca === "abater_padrao" */}
+                {modoDiferenca === "abater_padrao" && simulacaoAbateCascata.length > 0 && (
+                  <div style={{ marginTop: 4 }}>
+                    <div className="sub" style={{ marginBottom: 6, fontWeight: 600 }}>
+                      Demonstrativo de abatimento nas próximas parcelas:
+                    </div>
+                    <div
+                      style={{
+                        background: "var(--card)",
+                        border: "1px solid var(--line)",
+                        borderRadius: 8,
+                        overflow: "hidden",
+                        maxHeight: 180,
+                        overflowY: "auto",
+                      }}
+                    >
+                      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                        <thead>
+                          <tr style={{ background: "var(--soft)", color: "var(--mut)", fontSize: 11 }}>
+                            <th style={{ textAlign: "left", padding: "6px 8px" }}>PARCELA</th>
+                            <th style={{ textAlign: "left", padding: "6px 8px" }}>VENCIMENTO</th>
+                            <th style={{ textAlign: "right", padding: "6px 8px" }}>SALDO ATUAL</th>
+                            <th style={{ textAlign: "right", padding: "6px 8px" }}>VALOR ABATIDO</th>
+                            <th style={{ textAlign: "right", padding: "6px 8px" }}>NOVO SALDO</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {simulacaoAbateCascata.map(p => (
+                            <tr key={p.id} style={{ borderTop: "1px solid var(--line)" }}>
+                              <td style={{ padding: "6px 8px", fontWeight: 600 }}>{p.parcelas || "—"}</td>
+                              <td style={{ padding: "6px 8px" }}>{dt(p.vencimento)}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">{money(p.saldo_devedor)}</td>
+                              <td style={{ padding: "6px 8px", textAlign: "right", color: p.valorAbatido > 0 ? "#15803d" : "var(--mut)", fontWeight: p.valorAbatido > 0 ? 700 : 400 }} className="mono">
+                                {p.valorAbatido > 0 ? `- ${money(p.valorAbatido)}` : "—"}
+                              </td>
+                              <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">
+                                {p.quitada ? (
+                                  <span className="pill" style={{ background: "#15803d15", color: "#15803d", borderColor: "#15803d", fontSize: 11 }}>
+                                    ✓ Quitada
+                                  </span>
+                                ) : (
+                                  <b>{money(p.novoSaldo)}</b>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Caso 3: Valor exato */}
+            {!isDiferente && (
+              <div style={{ background: "var(--soft)", padding: "10px 14px", borderRadius: 10, fontSize: 13, border: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ color: "#15803d", fontSize: 16 }}>✓</span>
+                <div>
+                  <b>Valor exato:</b> Este pagamento quita 100% da parcela <b>{parcelaIdentificador}</b>.
+                  {outras.length > 0 && (
+                    <span className="sub" style={{ display: "block" }}>
+                      Restam ainda {outras.length} parcela(s) futuras em aberto do cliente.
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Tabela de rateio quando modoDiferenca === "ratear" */}
+            {temRateio && (
+              <div style={{ display: "grid", gap: 10, marginTop: 4 }}>
                 <div className="sub">
                   Selecione quais promissórias futuras devem absorver a diferença do saldo:
                 </div>
@@ -1711,7 +2075,7 @@ export function BaixaDialog({
                     border: "1px solid var(--line)",
                     borderRadius: 10,
                     overflow: "hidden",
-                    maxHeight: 240,
+                    maxHeight: 220,
                     overflowY: "auto",
                   }}
                 >
@@ -1786,7 +2150,7 @@ export function BaixaDialog({
                     </div>
                     <div>
                       <span className="sub">Saldo restante:</span>
-                      <div className="mono" style={{ fontWeight: 700 }}>{money(saldoRestante)}</div>
+                      <div className="mono" style={{ fontWeight: 700 }}>{money(saldoRestanteRateio)}</div>
                     </div>
                     <div>
                       <span className="sub">Novo valor por parcela ({parcelasRateio.length}x):</span>
@@ -1796,36 +2160,9 @@ export function BaixaDialog({
                     </div>
                   </div>
                 )}
-              </>
+              </div>
             )}
           </div>
-        ) : (
-          /* Sem outras promissórias abertas */
-          ok && V < row.saldo_devedor && (
-            <div style={{ background: "var(--soft)", padding: 12, borderRadius: 10, border: "1px solid var(--line)" }}>
-              <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>
-                O valor pago é menor que o saldo devedor ({money(row.saldo_devedor)}). Como deseja registrar?
-              </div>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
-                <input
-                  type="radio"
-                  name="opcaoSemRestantes"
-                  checked={opcaoSemRestantes === "abater"}
-                  onChange={() => setOpcaoSemRestantes("abater")}
-                />
-                Abater pagamento (continua em aberto com saldo de {money(row.saldo_devedor - V)})
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, marginTop: 4 }}>
-                <input
-                  type="radio"
-                  name="opcaoSemRestantes"
-                  checked={opcaoSemRestantes === "quitar"}
-                  onChange={() => setOpcaoSemRestantes("quitar")}
-                />
-                Quitar promissória (conceder desconto e finalizar)
-              </label>
-            </div>
-          )
         )}
 
         <div className="err">{err}</div>
@@ -1839,7 +2176,17 @@ export function BaixaDialog({
             style={{ background: "#15803d", borderColor: "#15803d", color: "#fff" }}
             disabled={busy || !ok || V <= 0}
           >
-            {busy ? "Gravando…" : temRateio ? "Confirmar Baixa e Recalcular" : "Confirmar Baixa"}
+            {busy
+              ? "Gravando…"
+              : temRateio
+              ? "Confirmar Baixa e Recalcular"
+              : modoDiferenca === "quitar_desconto"
+              ? "Confirmar Quitação com Desconto"
+              : modoDiferenca === "abater_padrao" && V > row.saldo_devedor
+              ? "Confirmar Baixa e Abater Próximas"
+              : modoDiferenca === "abater_padrao" && V < row.saldo_devedor
+              ? "Confirmar Baixa Parcial"
+              : "Confirmar Baixa"}
           </button>
         </div>
       </form>
