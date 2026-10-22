@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, mensagemCobranca, money, normalizarTelefones, identificarCompraAtual } from "./lib";
+import { dt, hoje, diffDias, mensagemCobranca, money, normalizarTelefones, identificarCompraAtual } from "./lib";
 import type { Row } from "./lib";
 import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 import { SortIcon } from "./SortIcon";
@@ -388,18 +388,26 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
                     >
                       {c.cliente}
                     </button>
-                    <span
-                      style={{
-                        fontSize: 10,
-                        fontWeight: 700,
-                        padding: "1px 6px",
-                        borderRadius: 99,
-                        background: c.vencido > 0 ? "rgba(180, 35, 24, 0.12)" : c.saldo > 0 ? "rgba(217, 119, 6, 0.12)" : "rgba(10, 124, 76, 0.12)",
-                        color: c.vencido > 0 ? "var(--bad)" : c.saldo > 0 ? "var(--warn)" : "var(--brand)",
-                      }}
-                    >
-                      {c.vencido > 0 ? "🔴 Risco Alto" : c.saldo > 0 ? "🟡 Regular" : "🟢 Diamante"}
-                    </span>
+                    {(() => {
+                      const emAtrasoRecente = c.vencido > 0 && c.proximo_venc && diffDias(hoje(), c.proximo_venc) <= 60;
+                      const badgeCor = c.vencido > 0 ? (emAtrasoRecente ? "var(--warn)" : "var(--bad)") : c.saldo > 0 ? "var(--warn)" : "var(--brand)";
+                      const badgeBg = c.vencido > 0 ? (emAtrasoRecente ? "rgba(217, 119, 6, 0.12)" : "rgba(180, 35, 24, 0.12)") : c.saldo > 0 ? "rgba(217, 119, 6, 0.12)" : "rgba(10, 124, 76, 0.12)";
+                      const badgeTexto = c.vencido > 0 ? (emAtrasoRecente ? "🟡 Em Atraso" : "🔴 Risco Alto") : c.saldo > 0 ? "🟡 Regular" : "🟢 Diamante";
+                      return (
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 700,
+                            padding: "1px 6px",
+                            borderRadius: 99,
+                            background: badgeBg,
+                            color: badgeCor,
+                          }}
+                        >
+                          {badgeTexto}
+                        </span>
+                      );
+                    })()}
                   </div>
                 </td>
                 <td className="mono">{c.telefone || "—"}</td>

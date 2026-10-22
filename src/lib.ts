@@ -57,10 +57,10 @@ export function deriveStatus(r: {
   if (r.fundo_perdido) return "FUNDO PERDIDO";
   const saldo = r.saldo_devedor ?? Math.max(r.divida_total - r.valor_pago, 0);
   if (saldo <= 0) return "QUITADO";
-  if (r.valor_pago > 0) return "PAGANDO";
   const h = hoje();
   const vencReal = obterVencimentoEfetivo(r) || r.vencimento;
   if (vencReal && vencReal < h) return "NÃO PAGOU";
+  if (r.valor_pago > 0) return "PAGANDO";
   return "A VENCER";
 }
 
@@ -552,20 +552,11 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
     const abertas = carnetRows.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) > 0);
     const pagas = carnetRows.filter(r => (r.saldo_devedor ?? 0) <= 0);
 
-    let dividaTotal = carnetRows.reduce((s, r) => s + (r.divida_total ?? 0), 0);
-    let valorPago = carnetRows.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+    const valorUnitario = carnetRows[0]?.divida_total || 0;
+    const somaDividaReal = carnetRows.reduce((s, r) => s + (r.divida_total ?? 0), 0);
+    const dividaTotal = Math.max(somaDividaReal, denom * valorUnitario);
     const saldoDevedor = carnetRows.reduce((s, r) => s + (r.fundo_perdido ? 0 : (r.saldo_devedor ?? 0)), 0);
-
-    // Se temos apenas as parcelas abertas no array (ex: 6/16 a 16/16), inferimos as parcelas 1 a 5 pagas
-    if (abertas.length > 0 && pagas.length === 0) {
-      const minNum = parseInt((abertas[0].parcelas || "").match(/^(\d+)/)?.[1] || "1", 10);
-      if (minNum > 1) {
-        const parcelasPagasQtd = minNum - 1;
-        const valorUnitario = abertas[0].divida_total || 0;
-        dividaTotal = denom * valorUnitario;
-        valorPago = parcelasPagasQtd * valorUnitario + abertas.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
-      }
-    }
+    const valorPago = Math.max(carnetRows.reduce((s, r) => s + (r.valor_pago ?? 0), 0), Math.max(0, dividaTotal - saldoDevedor));
 
     let proximoVencimento: string | null = null;
     let proximaPromissoria: Row | null = null;
@@ -936,13 +927,29 @@ export function calcularScoreCliente(historico: Row[]): CreditScoreInfo {
   }
 
   if (totalVencido > 0 || maiorAtrasoDias > 15) {
+    if (maiorAtrasoDias <= 60) {
+      return {
+        score: "B",
+        selo: `🟡 Em Atraso (${maiorAtrasoDias}d)`,
+        rotulo: "Em Atraso",
+        cor: "var(--warn)",
+        bgCor: "rgba(217, 119, 6, 0.12)",
+        descricao: `Possui ${vencidas.length} promissória(s) em atraso recente (${maiorAtrasoDias} dias) totalizando ${money(totalVencido)}.`,
+        recomendacaoVenda: "Cobrar regularização das parcelas em atraso antes de liberar novo crediário.",
+        totalTitulos: historico.length,
+        totalVencido,
+        totalPago,
+        maiorAtrasoDias,
+        temFundoPerdido: false,
+      };
+    }
     return {
       score: "C",
       selo: `🔴 Risco Alto (${maiorAtrasoDias}d)`,
       rotulo: "Inadimplente",
       cor: "var(--bad)",
       bgCor: "rgba(180, 35, 24, 0.12)",
-      descricao: `Possui ${vencidas.length} promissória(s) vencida(s) totalizando ${money(totalVencido)}.`,
+      descricao: `Possui ${vencidas.length} promissória(s) vencida(s) há mais de 60 dias totalizando ${money(totalVencido)}.`,
       recomendacaoVenda: "⚠️ ATENÇÃO: Não liberar novo crediário sem entrada mínima de 50% ou quitação do atraso.",
       totalTitulos: historico.length,
       totalVencido,

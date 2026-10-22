@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import {
-  LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV, extrairInfoParcelas,
+  LBL, cls, deriveStatus, dt, hoje, diffDias, mensagemCobranca, money, baixarCSV, extrairInfoParcelas,
   agruparClientesParaListagem,
 } from "./lib";
 import type { Row, Status, ClienteConsolidado } from "./lib";
@@ -40,9 +40,18 @@ function getScoreFromLinha(r: Row) {
   const h = hoje();
   const vencida = r.saldo_devedor > 0 && !!r.vencimento && r.vencimento < h;
   if (vencida) {
+    const dias = diffDias(h, r.vencimento!);
+    if (dias <= 60) {
+      return {
+        selo: "🟡 Em Atraso",
+        rotulo: `Em Atraso (${dias}d)`,
+        cor: "var(--warn)",
+        bgCor: "rgba(217, 119, 6, 0.12)",
+      };
+    }
     return {
       selo: "🔴 Risco Alto",
-      rotulo: "Risco Alto (Inadimplente)",
+      rotulo: `Risco Alto (${dias}d)`,
       cor: "var(--bad)",
       bgCor: "rgba(180, 35, 24, 0.12)",
     };
@@ -83,7 +92,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [venc, setVenc] = useState<VencFiltro>("");
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroClienteTemp, setFiltroClienteTemp] = useState("");
-  const [filtroScore, setFiltroScore] = useState<"" | "diamante" | "regular" | "risco_alto" | "fundo_perdido">("");
+  const [filtroScore, setFiltroScore] = useState<"" | "diamante" | "regular" | "em_atraso" | "risco_alto" | "fundo_perdido">("");
   const [clientScores, setClientScores] = useState<Record<string, { selo: string; rotulo: string; cor: string; bgCor: string }>>({});
   const [filtroTelefone, setFiltroTelefone] = useState<"" | "com" | "sem">("");
   const [filtroDivida, setFiltroDivida] = useState("");
@@ -160,13 +169,61 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   }, []);
 
   const loadRows = useCallback(async () => {
-    let query = supabase.from("promissorias").select("*", { count: "exact" });
     const s = qd.replace(/[%,()*]/g, " ").trim();
-    if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
     const h = hoje();
+
+    // 1. Obter lista de clientes que possuem débitos em aberto para impedir que apareçam no card Quitado
+    const { data: abertosNomesData } = await supabase
+      .from("promissorias")
+      .select("cliente_nome")
+      .eq("fundo_perdido", false)
+      .gt("saldo_devedor", 0);
+    const setAbertos = new Set((abertosNomesData || []).map(r => r.cliente_nome.trim().toUpperCase()));
+
+    // 2. Se o usuário selecionou especificamente o card QUITADO
+    if (status === "QUITADO") {
+      let qQuit = supabase
+        .from("promissorias")
+        .select("*")
+        .eq("fundo_perdido", false)
+        .lte("saldo_devedor", 0);
+      if (s) qQuit = qQuit.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+      if (filtroCliente) qQuit = qQuit.ilike("cliente_nome", `%${filtroCliente.trim()}%`);
+      if (ini) qQuit = qQuit.gte("vencimento", ini);
+      if (fim) qQuit = qQuit.lte("vencimento", fim);
+      const { data: qData, error: qErr } = await qQuit.order("vencimento", { ascending: false }).limit(2000);
+      if (qErr) { setError(qErr.message); return; }
+      // Exclui clientes com débitos em aberto (evita que cliente com parcelas atrasadas ou a vencer apareça no Quitado)
+      const limpas = (qData ?? []).filter(r => !setAbertos.has(r.cliente_nome.trim().toUpperCase()));
+      setError(""); setRows(limpas as Row[]); setCount(limpas.length);
+      return;
+    }
+
+    // 3. Se o usuário está no card 'Todas' geral sem filtros adicionais de texto/datas
+    if (!s && !status && statusMultiplos.length === 0 && !filtroCliente && !ini && !fim && !venc && !filtroScore && !filtroTelefone && !filtroDivida && !filtroPago && !filtroSaldo) {
+      const [r1, r2, r3, r4, rQuit] = await Promise.all([
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(0, 999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(1000, 1999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(2000, 2999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(3000, 3999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).lte("saldo_devedor", 0).order("vencimento", { ascending: false }).limit(1000)
+      ]);
+      const uniao = [
+        ...(r1.data || []),
+        ...(r2.data || []),
+        ...(r3.data || []),
+        ...(r4.data || []),
+        ...(rQuit.data || [])
+      ];
+      setError(""); setRows(uniao as Row[]); setCount(uniao.length);
+      return;
+    }
+
+    let query = supabase.from("promissorias").select("*", { count: "exact" });
+    if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
     if (statusMultiplos.length > 0) {
       const temQuitado = statusMultiplos.includes("QUITADO");
-      const temAberto = statusMultiplos.some(s => s === "PAGANDO" || s === "A VENCER" || s === "NÃO PAGOU");
+      const temAberto = statusMultiplos.some(st => st === "PAGANDO" || st === "A VENCER" || st === "NÃO PAGOU");
       const temPerdido = statusMultiplos.includes("FUNDO PERDIDO");
 
       if (!temQuitado && temAberto && !temPerdido) {
@@ -179,7 +236,6 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
       }
     } else if (status === "ABERTO") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
-    else if (status === "QUITADO") query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
     else if (status === "PAGANDO") query = query.eq("fundo_perdido", false).gt("valor_pago", 0).gt("saldo_devedor", 0);
     else if (status === "A VENCER") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).or(`vencimento.gte.${h},vencimento.is.null`);
     else if (status === "NÃO PAGOU") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).lt("vencimento", h);
@@ -213,8 +269,16 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
     } else if (filtroScore === "regular") {
       query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).or(`vencimento.gte.${h},vencimento.is.null`);
+    } else if (filtroScore === "em_atraso") {
+      const d60 = new Date();
+      d60.setDate(d60.getDate() - 60);
+      const d60Str = d60.toISOString().slice(0, 10);
+      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h).gte("vencimento", d60Str);
     } else if (filtroScore === "risco_alto") {
-      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", h);
+      const d60 = new Date();
+      d60.setDate(d60.getDate() - 60);
+      const d60Str = d60.toISOString().slice(0, 10);
+      query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).lt("vencimento", d60Str);
     } else if (filtroScore === "fundo_perdido") {
       query = query.eq("fundo_perdido", true);
     }
@@ -235,7 +299,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     } else {
       query = query.order(sortCol, { ascending: sortAsc });
     }
-    const { data, count: c, error } = await query.order("id").limit(1000);
+    const { data, count: c, error } = await query.order("id").limit(2000);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
   }, [qd, status, statusMultiplos, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
@@ -271,12 +335,27 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     let list = agruparClientesParaListagem(rows);
     if (statusMultiplos.length > 0) {
       list = list.filter(cli => statusMultiplos.includes(cli.status));
+    } else if (status) {
+      if (status === "ABERTO") {
+        list = list.filter(cli => !cli.fundo_perdido && cli.saldo_devedor > 0);
+      } else if (status === "QUITADO") {
+        list = list.filter(cli => !cli.fundo_perdido && cli.saldo_devedor <= 0 && cli.status === "QUITADO");
+      } else if (status === "FUNDO PERDIDO") {
+        list = list.filter(cli => cli.fundo_perdido || cli.status === "FUNDO PERDIDO");
+      } else {
+        list = list.filter(cli => cli.status === status);
+      }
     }
     return list;
-  }, [rows, statusMultiplos]);
+  }, [rows, statusMultiplos, status]);
 
   const sortedClientes = useMemo(() => {
     return [...clientesConsolidados].sort((a, b) => {
+      if (sortCol === "vencimento" || sortCol === "status") {
+        const aTem = (a.saldo_devedor > 0 && !a.fundo_perdido) ? 1 : 0;
+        const bTem = (b.saldo_devedor > 0 && !b.fundo_perdido) ? 1 : 0;
+        if (aTem !== bTem) return bTem - aTem;
+      }
       let va: any = a[sortCol as keyof ClienteConsolidado];
       let vb: any = b[sortCol as keyof ClienteConsolidado];
       if (sortCol === "status") {
@@ -316,19 +395,23 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       .then(({ data, error }) => {
         if (cancel || error || !data) return;
         const h = hoje();
-        const grouped: Record<string, { temFundoPerdido: boolean; temVencido: boolean; temAberto: boolean }> = {};
+        const grouped: Record<string, { temFundoPerdido: boolean; temVencido: boolean; maxDiasAtraso: number; temAberto: boolean }> = {};
 
         for (const row of data) {
           const key = (row.cliente_nome || "").trim().toUpperCase();
           if (!key) continue;
           if (!grouped[key]) {
-            grouped[key] = { temFundoPerdido: false, temVencido: false, temAberto: false };
+            grouped[key] = { temFundoPerdido: false, temVencido: false, maxDiasAtraso: 0, temAberto: false };
           }
           if (row.fundo_perdido) grouped[key].temFundoPerdido = true;
           if ((row.saldo_devedor ?? 0) > 0) {
             grouped[key].temAberto = true;
             if (row.vencimento && row.vencimento < h) {
               grouped[key].temVencido = true;
+              const d = diffDias(h, row.vencimento);
+              if (d > grouped[key].maxDiasAtraso) {
+                grouped[key].maxDiasAtraso = d;
+              }
             }
           }
         }
@@ -343,12 +426,21 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
               bgCor: "rgba(100, 116, 139, 0.15)",
             };
           } else if (st.temVencido) {
-            res[key] = {
-              selo: "🔴 Risco Alto",
-              rotulo: "Risco Alto (Inadimplente)",
-              cor: "var(--bad)",
-              bgCor: "rgba(180, 35, 24, 0.12)",
-            };
+            if (st.maxDiasAtraso <= 60) {
+              res[key] = {
+                selo: "🟡 Em Atraso",
+                rotulo: `Em Atraso (${st.maxDiasAtraso}d)`,
+                cor: "var(--warn)",
+                bgCor: "rgba(217, 119, 6, 0.12)",
+              };
+            } else {
+              res[key] = {
+                selo: "🔴 Risco Alto",
+                rotulo: `Risco Alto (${st.maxDiasAtraso}d)`,
+                cor: "var(--bad)",
+                bgCor: "rgba(180, 35, 24, 0.12)",
+              };
+            }
           } else if (st.temAberto) {
             res[key] = {
               selo: "🟡 Regular",
@@ -1139,7 +1231,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
               Score: {
                 filtroScore === "diamante" ? "🟢 Diamante" :
                   filtroScore === "regular" ? "🟡 Regular" :
-                    filtroScore === "risco_alto" ? "🔴 Risco Alto" : "⛔ Fundo Perdido"
+                    filtroScore === "em_atraso" ? "🟡 Em Atraso" :
+                      filtroScore === "risco_alto" ? "🔴 Risco Alto" : "⛔ Fundo Perdido"
               }
               <button type="button" onClick={() => { setFiltroScore(""); reset(); }} title="Remover filtro">✕</button>
             </span>
@@ -1223,11 +1316,13 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       ? "🟢 Diamante"
                       : filtroScore === "regular"
                         ? "🟡 Regular"
-                        : filtroScore === "risco_alto"
-                          ? "🔴 Risco Alto"
-                          : filtroScore === "fundo_perdido"
-                            ? "⛔ Fundo Perdido"
-                            : ""
+                        : filtroScore === "em_atraso"
+                          ? "🟡 Em Atraso"
+                          : filtroScore === "risco_alto"
+                            ? "🔴 Risco Alto"
+                            : filtroScore === "fundo_perdido"
+                              ? "⛔ Fundo Perdido"
+                              : ""
                 }
                 onClearFilter={() => {
                   setFiltroCliente("");
@@ -1239,7 +1334,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   { label: "Todas as classificações", value: "", active: filtroScore === "" },
                   { label: "🟢 Diamante (Quitados)", value: "diamante", active: filtroScore === "diamante" },
                   { label: "🟡 Regular (Em dia)", value: "regular", active: filtroScore === "regular" },
-                  { label: "🔴 Risco Alto (Vencidos)", value: "risco_alto", active: filtroScore === "risco_alto" },
+                  { label: "🟡 Em Atraso (até 60d)", value: "em_atraso", active: filtroScore === "em_atraso" },
+                  { label: "🔴 Risco Alto (> 60d)", value: "risco_alto", active: filtroScore === "risco_alto" },
                   { label: "⛔ Fundo Perdido", value: "fundo_perdido", active: filtroScore === "fundo_perdido" },
                 ]}
                 onSelectOption={val => {
@@ -1411,11 +1507,30 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           <tbody>
             {clientesPaginados.map(cli => {
               const cliKey = cli.cliente_nome.trim().toUpperCase();
+              const cliDiasAtraso = (cli.vencimento && cli.vencimento < hoje()) ? diffDias(hoje(), cli.vencimento) : 0;
               const badge = clientScores[cliKey] || {
-                selo: cli.fundo_perdido ? "⛔ Fundo Perdido" : cli.status === "NÃO PAGOU" ? "🔴 Risco Alto" : cli.status === "QUITADO" ? "🟢 Diamante" : "🟡 Regular",
+                selo: cli.fundo_perdido
+                  ? "⛔ Fundo Perdido"
+                  : cli.status === "NÃO PAGOU"
+                  ? (cliDiasAtraso <= 60 ? "🟡 Em Atraso" : "🔴 Risco Alto")
+                  : cli.status === "QUITADO"
+                  ? "🟢 Diamante"
+                  : "🟡 Regular",
                 rotulo: cli.status,
-                cor: cli.fundo_perdido ? "#64748b" : cli.status === "NÃO PAGOU" ? "var(--bad)" : cli.status === "QUITADO" ? "var(--brand)" : "var(--warn)",
-                bgCor: cli.fundo_perdido ? "rgba(100, 116, 139, 0.15)" : cli.status === "NÃO PAGOU" ? "rgba(180, 35, 24, 0.12)" : cli.status === "QUITADO" ? "rgba(10, 124, 76, 0.12)" : "rgba(217, 119, 6, 0.12)",
+                cor: cli.fundo_perdido
+                  ? "#64748b"
+                  : cli.status === "NÃO PAGOU"
+                  ? (cliDiasAtraso <= 60 ? "var(--warn)" : "var(--bad)")
+                  : cli.status === "QUITADO"
+                  ? "var(--brand)"
+                  : "var(--warn)",
+                bgCor: cli.fundo_perdido
+                  ? "rgba(100, 116, 139, 0.15)"
+                  : cli.status === "NÃO PAGOU"
+                  ? (cliDiasAtraso <= 60 ? "rgba(217, 119, 6, 0.12)" : "rgba(180, 35, 24, 0.12)")
+                  : cli.status === "QUITADO"
+                  ? "rgba(10, 124, 76, 0.12)"
+                  : "rgba(217, 119, 6, 0.12)",
               };
 
               const refRow: Row = cli.proximaPromissoria || cli.todasPromissorias[0] || {
