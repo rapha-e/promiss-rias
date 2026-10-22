@@ -27,7 +27,6 @@ type ClienteFila = {
 };
 
 const PIX_KEY = "leooticas_pix_chave";
-const CHAVE_PIX_PADRAO = "15.269.478/0001-99";
 
 function getHojeISO() {
   const agora = new Date();
@@ -58,9 +57,9 @@ export default function RenegociacaoCobranca({
   const [ddd, setDddLocal] = useState(getDDD());
   const [chavePix, setChavePix] = useState(() => {
     try {
-      return localStorage.getItem(PIX_KEY) || CHAVE_PIX_PADRAO;
+      return localStorage.getItem(PIX_KEY) || "";
     } catch {
-      return CHAVE_PIX_PADRAO;
+      return "";
     }
   });
 
@@ -287,86 +286,70 @@ export default function RenegociacaoCobranca({
   const gerarMensagem = (item: ClienteFila): string => {
     const primeiroNome = titulo(item.cliente.trim().split(/\s+/)[0] || "Cliente");
     const saldoTotal = item.valorTotal;
-    const chaveEfetiva = chavePix.trim() || CHAVE_PIX_PADRAO;
+    const chavePixTxt = chavePix.trim() ? `\n🔑 *Chave PIX:* \`${chavePix.trim()}\`` : "";
 
-    // Função auxiliar para formatar o bloco de Pix Copia e Cola para WhatsApp
-    const montarBlocoPix = (valorCentavos: number, txidPrefixo: string) => {
-      const payload = gerarPayloadPix({
-        chave: chaveEfetiva,
-        valor: valorCentavos,
-        txid: `${txidPrefixo}${item.promissorias[0]?.id || "1"}`.slice(0, 25),
-      });
+    // Gera o código PIX Copia e Cola com o valor com desconto
+    const pixCopiaColaVista = chavePix.trim()
+      ? `\n📋 *PIX Copia e Cola (valor de ${money(simulacao.valorComDesconto)} já preenchido):*\n\`${gerarPayloadPix({
+          chave: chavePix.trim(),
+          valor: simulacao.valorComDesconto,
+          txid: `RENEG${item.promissorias[0]?.id || "1"}`,
+        })}\``
+      : "";
 
-      return (
-        `\n\n📋 *Pix Copia e Cola (valor de ${money(valorCentavos)}):*\n` +
-        `\`${payload}\`\n` +
-        `_(Basta dar um toque em cima do código para copiar e colar no app do seu banco)_\n\n`
-      );
-    };
-
-    // 1. SCRIPT DE LEMBRETE AMIGÁVEL (D-3 a D+5)
-    if (tipoScript === "lembrete_cortes") {
-      let statusVencimento = "em aberto";
-      if (item.vencimentoMaisUrgente) {
-        const dias = diffDias(hoje, item.vencimentoMaisUrgente);
-        if (dias > 0) {
-          statusVencimento = `vencida em ${dt(item.vencimentoMaisUrgente)}`;
-        } else if (dias === 0) {
-          statusVencimento = `que vence hoje (${dt(item.vencimentoMaisUrgente)})`;
-        } else {
-          statusVencimento = `com vencimento em ${dt(item.vencimentoMaisUrgente)}`;
-        }
-      }
-
-      return (
-        `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim! 👓\n\n` +
-        `Passando apenas para um lembrete rápido sobre a sua promissória na LeoÓticas no valor de *${money(saldoTotal)}* (${statusVencimento}).\n\n` +
-        `Sabemos que a rotina é corrida e a gente acaba deixando passar — se já efetuou o pagamento, pode desconsiderar este aviso com tranquilidade! 👍\n\n` +
-        `Para facilitar e você resolver direto do celular, basta usar o código Pix Copia e Cola abaixo:` +
-        montarBlocoPix(saldoTotal, "LEMB") +
-        `Qualquer dúvida ou se precisar de auxílio, é só dar um alô aqui. Um abraço da nossa equipe!`
-      );
-    }
-
-    // 2. SCRIPT DE CONTATO ATIVO & ESCUTA (D+6 a D+30)
-    if (tipoScript === "contato_ativo") {
-      return (
-        `Oi, ${primeiroNome}! Tudo bem? Aqui é da LeoÓticas. 🙏\n\n` +
-        `Notei aqui no sistema que a sua parcela no valor de *${money(saldoTotal)}* acabou vencendo há alguns dias e ainda não acusou baixa.\n\n` +
-        `Aconteceu algum imprevisto por aí? Valorizamos muito você como cliente da nossa casa e queremos encontrar um caminho para te ajudar a manter tudo em dia sem pesar no bolso, sem julgamentos.\n\n` +
-        `Caso queira regularizar agora com facilidade, deixei o Pix Copia e Cola pronto para você:` +
-        montarBlocoPix(saldoTotal, "CONT") +
-        `Se preferir combinar uma data boa para você, me responda por aqui. Aguardo seu retorno!`
-      );
-    }
-
-    // 3. SCRIPT DE PROPOSTA DE REPACTUAÇÃO (D+31 a D+60)
+    // 1. SCRIPT DE OPÇÃO BINÁRIA (TÉCNICA DE ALTA CONVERSÃO)
     if (tipoScript === "binaria") {
       const textoOpcao2 = simulacao.entradaReal > 0
         ? `👉 *OPÇÃO 2 (Entrada + Parcelamento):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para ${diaVencimentoParcelas}.\n\n`
-        : `👉 *OPÇÃO 2 (Parcelamento Facilitado):* Dividimos todo o seu saldo em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* sem entrada, com o 1º vencimento para ${diaVencimentoParcelas}.\n\n`;
+        : `👉 *OPÇÃO 2 (Parcelamento Facilitado):* Dividimos todo o seu saldo em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* sem entrada, com 1º vencimento para ${diaVencimentoParcelas}.\n\n`;
 
       return (
-        `Olá, ${primeiroNome}! Tudo bem? Aqui é da equipe da LeoÓticas.\n\n` +
+        `Olá, ${primeiroNome}! Tudo bem? Aqui é da equipe da *LeoÓticas*.\n\n` +
         `Estou entrando em contato referente à sua pendência conosco no valor total de *${money(saldoTotal)}*.\n\n` +
-        `Sabemos que imprevistos financeiros acontecem com qualquer um e queremos muito te ajudar a regularizar sua situação hoje com total tranquilidade. Por isso, alinhamos duas opções facilitadas:\n\n` +
-        `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de *${money(simulacao.valorDesconto)}*) e quitamos seu saldo hoje mesmo! (Basta usar o código Pix abaixo)\n` +
-        montarBlocoPix(simulacao.valorComDesconto, "RENEG") +
+        `Sabemos que imprevistos acontecem e queremos muito te ajudar a regularizar sua situação hoje com tranquilidade. Preparamos duas opções facilitadas:\n\n` +
+        `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de ${money(simulacao.valorDesconto)}) e quitamos seu saldo hoje mesmo!${chavePixTxt}${pixCopiaColaVista}\n\n` +
         textoOpcao2 +
-        `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Me dá o toque!`
+        `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Podemos fechar?`
       );
     }
 
-    // 4. SCRIPT DE RESGATE COM DESCONTO / ÚLTIMA CHAMADA (D+61+ e FUNDO PERDIDO)
+    // 2. SCRIPT DE RESGATE COM DESCONTO À VISTA (D+61+ e FUNDO PERDIDO)
     if (tipoScript === "desconto_vista") {
       return (
-        `Olá, ${primeiroNome}! Oportunidade exclusiva de quitação na LeoÓticas! 🎯\n\n` +
-        `Estamos fechando o balanço de cobranças do mês e a gerência autorizou uma condição especial única para o seu saldo em aberto de *${money(saldoTotal)}*:\n\n` +
-        `💥 *Quitação total por apenas ${money(simulacao.valorComDesconto)} via PIX!* (Você economiza *${money(simulacao.valorDesconto)}* com *${descontoPercentual}%* de desconto).\n\n` +
-        `Com isso, damos baixa total nas promissórias e o seu cadastro fica 100% limpo e regularizado conosco de vez.\n\n` +
-        `Para aproveitar essa condição exclusiva de hoje, basta copiar e colar o código Pix abaixo:` +
-        montarBlocoPix(simulacao.valorComDesconto, "RESG") +
-        `Posso emitir o recibo de quitação assim que o pagamento constar aqui?`
+        `Olá, ${primeiroNome}! Oportunidade exclusiva de quitação na *LeoÓticas*!\n\n` +
+        `Estamos fechando o balanço de cobranças e a gerência autorizou uma condição especial única para o seu saldo em aberto de *${money(saldoTotal)}*:\n\n` +
+        `🎯 *Quitação total por apenas ${money(simulacao.valorComDesconto)} via PIX!* (Você economiza ${money(simulacao.valorDesconto)} com ${descontoPercentual}% de desconto).\n\n` +
+        `Com isso, damos baixa total nas promissórias e seu cadastro fica 100% regularizado conosco.${chavePixTxt}${pixCopiaColaVista}\n\n` +
+        `Essa condição é especial para regularização hoje. Posso emitir o recibo de quitação para você?`
+      );
+    }
+
+    // 3. SCRIPT DE CONTATO ATIVO & ESCUTA (D+6 a D+30)
+    if (tipoScript === "contato_ativo") {
+      return (
+        `Oi, ${primeiroNome}! Tudo bem? Aqui é da *LeoÓticas*.\n\n` +
+        `Notei aqui no sistema que a sua parcela no valor de *${money(saldoTotal)}* acabou vencendo há alguns dias e ainda não acusou baixa.\n\n` +
+        `Aconteceu algum imprevisto? Valorizamos muito você como cliente da nossa loja e queremos encontrar um caminho para te ajudar a manter tudo em dia sem pesar no bolso.\n\n` +
+        `Consegue me responder por aqui para combinarmos uma data boa para você? Aguardo seu retorno! 🙏`
+      );
+    }
+
+    // 4. SCRIPT DE LEMBRETE CORTÊS (D-3 a D+5)
+    if (tipoScript === "lembrete_cortes") {
+      const vencStr = item.vencimentoMaisUrgente ? `vencida em ${dt(item.vencimentoMaisUrgente)}` : "em aberto";
+      const pixLembrete = chavePix.trim()
+        ? `\n📋 *PIX Copia e Cola (valor de ${money(saldoTotal)}):*\n\`${gerarPayloadPix({
+            chave: chavePix.trim(),
+            valor: saldoTotal,
+            txid: `VENC${item.promissorias[0]?.id || "1"}`,
+          })}\``
+        : "";
+      return (
+        `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim!\n\n` +
+        `Passando apenas para um lembrete cortês da sua promissória na *LeoÓticas* no valor de *${money(saldoTotal)}* (${vencStr}).\n\n` +
+        `Caso já tenha efetuado o pagamento, por favor desconsidere este aviso.\n` +
+        `Se precisar da chave PIX para quitar direto pelo celular com facilidade:${chavePixTxt}${pixLembrete}\n\n` +
+        `Se precisar de auxílio ou da 2ª via, é só responder aqui. Um abraço da equipe LeoÓticas! 👓`
       );
     }
 
@@ -389,8 +372,8 @@ export default function RenegociacaoCobranca({
       `Olá, ${primeiroNome}! Tudo bem?\n\n` +
       `Passando para lembrar referente à sua compra na *LeoÓticas*:\n\n` +
       `${linhas.join("\n")}\n\n` +
-      `*Total em aberto:* ${money(item.valorTotal)}` +
-      montarBlocoPix(saldoTotal, "TRAD") +
+      `*Total em aberto:* ${money(item.valorTotal)}\n` +
+      `${chavePixTxt}\n\n` +
       `Caso já tenha efetuado o pagamento, por favor desconsidere. Se precisar de ajuda, é só nos responder aqui!`
     );
   };
@@ -814,27 +797,11 @@ export default function RenegociacaoCobranca({
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 <button
                   type="button"
-                  className={`btn ghost ${tipoScript === "lembrete_cortes" ? "on" : ""}`}
-                  style={{ fontSize: 12, padding: "5px 10px" }}
-                  onClick={() => setTipoScript("lembrete_cortes")}
-                >
-                  ✉️ 1. Lembrete Amigável (D-3 a D+5)
-                </button>
-                <button
-                  type="button"
-                  className={`btn ghost ${tipoScript === "contato_ativo" ? "on" : ""}`}
-                  style={{ fontSize: 12, padding: "5px 10px" }}
-                  onClick={() => setTipoScript("contato_ativo")}
-                >
-                  💬 2. Contato Ativo & Escuta (D+6 a D+30)
-                </button>
-                <button
-                  type="button"
                   className={`btn ghost ${tipoScript === "binaria" ? "on" : ""}`}
                   style={{ fontSize: 12, padding: "5px 10px" }}
                   onClick={() => setTipoScript("binaria")}
                 >
-                  ⭐ 3. Proposta de Repactuação (D+31 a D+60)
+                  ⭐ Opção Binária (Entrada vs À Vista)
                 </button>
                 <button
                   type="button"
@@ -842,7 +809,23 @@ export default function RenegociacaoCobranca({
                   style={{ fontSize: 12, padding: "5px 10px" }}
                   onClick={() => setTipoScript("desconto_vista")}
                 >
-                  🎯 4. Resgate com Desconto (D+61+)
+                  🎯 Quitação com Desconto PIX
+                </button>
+                <button
+                  type="button"
+                  className={`btn ghost ${tipoScript === "contato_ativo" ? "on" : ""}`}
+                  style={{ fontSize: 12, padding: "5px 10px" }}
+                  onClick={() => setTipoScript("contato_ativo")}
+                >
+                  💬 Contato Ativo & Escuta
+                </button>
+                <button
+                  type="button"
+                  className={`btn ghost ${tipoScript === "lembrete_cortes" ? "on" : ""}`}
+                  style={{ fontSize: 12, padding: "5px 10px" }}
+                  onClick={() => setTipoScript("lembrete_cortes")}
+                >
+                  ✉️ Lembrete Amigável
                 </button>
                 <button
                   type="button"
@@ -850,7 +833,7 @@ export default function RenegociacaoCobranca({
                   style={{ fontSize: 12, padding: "5px 10px" }}
                   onClick={() => setTipoScript("tradicional")}
                 >
-                  📄 5. Detalhado por Parcelas
+                  📄 Detalhado por Parcelas
                 </button>
               </div>
             </div>
