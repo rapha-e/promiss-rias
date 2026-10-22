@@ -63,6 +63,14 @@ function getScoreFromLinha(r: Row) {
   };
 }
 
+const TODOS_STATUS: { id: Status; label: string; desc: string; cor: string; bg: string }[] = [
+  { id: "A VENCER", label: "A vencer", desc: "No prazo, aguardando data de vencimento", cor: "#0284c7", bg: "rgba(2, 132, 199, 0.12)" },
+  { id: "PAGANDO", label: "Pagando", desc: "Com pagamentos parciais registrados", cor: "var(--warn)", bg: "rgba(217, 119, 6, 0.12)" },
+  { id: "NÃO PAGOU", label: "Não pagou", desc: "Vencido e pendente de pagamento", cor: "var(--bad)", bg: "rgba(180, 35, 24, 0.12)" },
+  { id: "FUNDO PERDIDO", label: "Fundo perdido", desc: "Promissórias baixadas / inadimplência", cor: "#64748b", bg: "rgba(100, 116, 139, 0.15)" },
+  { id: "QUITADO", label: "Quitado", desc: "Dívida 100% paga e liquidada", cor: "var(--brand)", bg: "rgba(10, 124, 76, 0.12)" },
+];
+
 export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [rows, setRows] = useState<Row[]>([]);
   const [count, setCount] = useState(0);
@@ -70,6 +78,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [q, setQ] = useState("");
   const [qd, setQd] = useState("");
   const [status, setStatus] = useState("");
+  const [statusMultiplos, setStatusMultiplos] = useState<Status[]>([]);
+  const [menuStatusOpen, setMenuStatusOpen] = useState(false);
   const [venc, setVenc] = useState<VencFiltro>("");
   const [filtroCliente, setFiltroCliente] = useState("");
   const [filtroClienteTemp, setFiltroClienteTemp] = useState("");
@@ -124,7 +134,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           const unicos = Array.from(new Set(data.map(d => d.cliente_nome.trim()))).slice(0, 8);
           setSugestoesBusca(unicos);
         }
-      } catch {}
+      } catch { }
     }, 200);
     return () => clearTimeout(t);
   }, [q]);
@@ -154,7 +164,21 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const s = qd.replace(/[%,()*]/g, " ").trim();
     if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
     const h = hoje();
-    if (status === "ABERTO") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
+    if (statusMultiplos.length > 0) {
+      const temQuitado = statusMultiplos.includes("QUITADO");
+      const temAberto = statusMultiplos.some(s => s === "PAGANDO" || s === "A VENCER" || s === "NÃO PAGOU");
+      const temPerdido = statusMultiplos.includes("FUNDO PERDIDO");
+
+      if (!temQuitado && temAberto && !temPerdido) {
+        query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
+      } else if (!temQuitado && temAberto && temPerdido) {
+        query = query.or("saldo_devedor.gt.0,fundo_perdido.eq.true");
+      } else if (!temQuitado && !temAberto && temPerdido) {
+        query = query.eq("fundo_perdido", true);
+      } else if (temQuitado && !temAberto && !temPerdido) {
+        query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
+      }
+    } else if (status === "ABERTO") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
     else if (status === "QUITADO") query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
     else if (status === "PAGANDO") query = query.eq("fundo_perdido", false).gt("valor_pago", 0).gt("saldo_devedor", 0);
     else if (status === "A VENCER") query = query.eq("fundo_perdido", false).eq("valor_pago", 0).or(`vencimento.gte.${h},vencimento.is.null`);
@@ -214,11 +238,42 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const { data, count: c, error } = await query.order("id").limit(1000);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+  }, [qd, status, statusMultiplos, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+
+  const toggleStatusMultiplo = (st: Status) => {
+    setStatus("");
+    setStatusMultiplos(prev => {
+      const next = prev.includes(st) ? prev.filter(x => x !== st) : [...prev, st];
+      return next;
+    });
+    reset();
+  };
+
+  const selecionarTodosExcetoQuitado = () => {
+    setStatus("");
+    setStatusMultiplos(["A VENCER", "PAGANDO", "NÃO PAGOU", "FUNDO PERDIDO"]);
+    setMenuStatusOpen(false);
+    reset();
+  };
+
+  const selecionarTodosStatus = () => {
+    setStatus("");
+    setStatusMultiplos(["A VENCER", "PAGANDO", "NÃO PAGOU", "FUNDO PERDIDO", "QUITADO"]);
+    reset();
+  };
+
+  const limparStatusMultiplos = () => {
+    setStatusMultiplos([]);
+    reset();
+  };
 
   const clientesConsolidados = useMemo(() => {
-    return agruparClientesParaListagem(rows);
-  }, [rows]);
+    let list = agruparClientesParaListagem(rows);
+    if (statusMultiplos.length > 0) {
+      list = list.filter(cli => statusMultiplos.includes(cli.status));
+    }
+    return list;
+  }, [rows, statusMultiplos]);
 
   const sortedClientes = useMemo(() => {
     return [...clientesConsolidados].sort((a, b) => {
@@ -401,7 +456,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     reset();
   };
 
-  const temFiltrosAtivos = Boolean(filtroCliente || filtroScore || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc);
+  const temFiltrosAtivos = Boolean(
+    filtroCliente || filtroScore || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc || statusMultiplos.length > 0
+  );
 
   const limparTodosFiltros = () => {
     setFiltroCliente("");
@@ -412,6 +469,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setFiltroPago("");
     setFiltroSaldo("");
     setStatus("");
+    setStatusMultiplos([]);
     setVenc("");
     reset();
   };
@@ -691,10 +749,231 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         </div>
       )}
 
-      <div className="chips">
+      <div className="chips" style={{ position: "relative", alignItems: "center" }}>
         {chips.map(([k, l, n]) => (
-          <button key={k} className={`chip ${status === k ? "on" : ""}`} onClick={() => { setStatus(k); reset(); }}>{l} · {n.toLocaleString("pt-BR")}</button>
+          <button
+            key={k}
+            className={`chip ${status === k && statusMultiplos.length === 0 ? "on" : ""}`}
+            onClick={() => {
+              setStatusMultiplos([]);
+              setStatus(k);
+              reset();
+            }}
+          >
+            {l} · {n.toLocaleString("pt-BR")}
+          </button>
         ))}
+
+        <div style={{ width: 1, height: 20, background: "var(--line)", margin: "0 4px" }} />
+
+        {/* Botão Filtro Personalizado com Popover de Múltiplos Status */}
+        <div style={{ position: "relative", display: "inline-block" }}>
+          <button
+            type="button"
+            className={`chip ${statusMultiplos.length > 0 ? "on" : ""}`}
+            onClick={() => setMenuStatusOpen(prev => !prev)}
+            title="Selecionar múltiplos status para filtrar simultaneamente"
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              fontWeight: statusMultiplos.length > 0 ? 700 : 600,
+              border: statusMultiplos.length > 0 ? "1.5px solid var(--brand)" : undefined,
+              boxShadow: statusMultiplos.length > 0 ? "0 0 0 2px rgba(10, 124, 76, 0.15)" : undefined,
+            }}
+          >
+            <span>⚙️</span>
+            <span>
+              Filtro personalizado
+              {statusMultiplos.length > 0 && ` (${statusMultiplos.length})`}
+            </span>
+            <span style={{ fontSize: 10, opacity: 0.7 }}>▾</span>
+          </button>
+
+          {menuStatusOpen && (
+            <>
+              {/* Backdrop para fechar ao clicar fora */}
+              <div
+                style={{ position: "fixed", inset: 0, zIndex: 90 }}
+                onClick={() => setMenuStatusOpen(false)}
+              />
+
+              {/* Painel do Popover */}
+              <div
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  top: "calc(100% + 8px)",
+                  background: "var(--card)",
+                  border: "1px solid var(--line)",
+                  borderRadius: 12,
+                  boxShadow: "0 12px 35px rgba(0,0,0,0.22)",
+                  zIndex: 100,
+                  width: 320,
+                  padding: 14,
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                }}
+              >
+                {/* Cabeçalho */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>
+                      Filtro Personalizado de Status
+                    </div>
+                    <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
+                      Escolha quais status deseja filtrar em conjunto
+                    </div>
+                  </div>
+                  {statusMultiplos.length > 0 && (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        fontWeight: 700,
+                        background: "var(--brand)",
+                        color: "var(--brand-ink)",
+                        padding: "2px 8px",
+                        borderRadius: 12,
+                      }}
+                    >
+                      {statusMultiplos.length} selecionado{statusMultiplos.length > 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
+
+                {/* Atalho Principal Solicitado: Todos exceto quitado */}
+                <div
+                  style={{
+                    background: "rgba(10, 124, 76, 0.08)",
+                    border: "1px dashed var(--brand)",
+                    borderRadius: 8,
+                    padding: 8,
+                    display: "flex",
+                    flexDirection: "column",
+                    gap: 6,
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={selecionarTodosExcetoQuitado}
+                    style={{
+                      width: "100%",
+                      justifyContent: "center",
+                      fontSize: 12,
+                      padding: "6px 10px",
+                      background: "var(--brand)",
+                      color: "var(--brand-ink)",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 6,
+                    }}
+                  >
+                    <span>⚡</span> <b>Todos exceto quitado</b>
+                  </button>
+                  <span style={{ fontSize: 10.5, color: "var(--mut)", textAlign: "center", lineHeight: 1.2 }}>
+                    Mostra: A vencer, Pagando, Não pagou e Fundo perdido
+                  </span>
+                </div>
+
+                {/* Ações rápidas: Selecionar todos / Limpar */}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={selecionarTodosStatus}
+                    style={{ flex: 1, fontSize: 11, padding: "4px 8px" }}
+                  >
+                    Marcar todos
+                  </button>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    onClick={limparStatusMultiplos}
+                    style={{ flex: 1, fontSize: 11, padding: "4px 8px", color: "var(--bad)" }}
+                  >
+                    Limpar
+                  </button>
+                </div>
+
+                <div style={{ height: 1, background: "var(--line)" }} />
+
+                {/* Lista de Checkboxes de cada Status */}
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 250, overflowY: "auto" }}>
+                  {TODOS_STATUS.map(stItem => {
+                    const ativo = statusMultiplos.includes(stItem.id);
+                    return (
+                      <label
+                        key={stItem.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          cursor: "pointer",
+                          background: ativo ? stItem.bg : "transparent",
+                          transition: "background .15s ease",
+                          userSelect: "none",
+                        }}
+                        onMouseEnter={e => {
+                          if (!ativo) e.currentTarget.style.background = "var(--soft)";
+                        }}
+                        onMouseLeave={e => {
+                          if (!ativo) e.currentTarget.style.background = "transparent";
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={ativo}
+                          onChange={() => toggleStatusMultiplo(stItem.id)}
+                          style={{
+                            width: 16,
+                            height: 16,
+                            cursor: "pointer",
+                            accentColor: stItem.cor,
+                          }}
+                        />
+                        <div style={{ display: "flex", flexDirection: "column", flex: 1 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                            <span
+                              style={{
+                                display: "inline-block",
+                                width: 8,
+                                height: 8,
+                                borderRadius: "50%",
+                                background: stItem.cor,
+                              }}
+                            />
+                            <span style={{ fontWeight: 600, fontSize: 12.5, color: "var(--ink)" }}>
+                              {stItem.label}
+                            </span>
+                          </div>
+                          <span style={{ fontSize: 10.5, color: "var(--mut)", marginLeft: 14 }}>
+                            {stItem.desc}
+                          </span>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+
+                {/* Rodapé */}
+                <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 4 }}>
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => setMenuStatusOpen(false)}
+                    style={{ fontSize: 11, padding: "5px 12px" }}
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       </div>
       <div className="bar" style={{ flexWrap: "wrap", gap: 10 }}>
         <input
@@ -859,8 +1138,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             <span className="filter-chip">
               Score: {
                 filtroScore === "diamante" ? "🟢 Diamante" :
-                filtroScore === "regular" ? "🟡 Regular" :
-                filtroScore === "risco_alto" ? "🔴 Risco Alto" : "⛔ Fundo Perdido"
+                  filtroScore === "regular" ? "🟡 Regular" :
+                    filtroScore === "risco_alto" ? "🔴 Risco Alto" : "⛔ Fundo Perdido"
               }
               <button type="button" onClick={() => { setFiltroScore(""); reset(); }} title="Remover filtro">✕</button>
             </span>
@@ -875,8 +1154,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             <span className="filter-chip">
               Dívida: {
                 filtroDivida === "ate_200" ? "Até R$ 200" :
-                filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
-                filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" : "Acima de R$ 1.000"
+                  filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
+                    filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" : "Acima de R$ 1.000"
               }
               <button type="button" onClick={() => { setFiltroDivida(""); reset(); }} title="Remover filtro">✕</button>
             </span>
@@ -891,8 +1170,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             <span className="filter-chip">
               Saldo: {
                 filtroSaldo === "aberto" ? "Em aberto" :
-                filtroSaldo === "quitado" ? "Quitado" :
-                filtroSaldo === "ate_500" ? "Até R$ 500" : "Acima de R$ 500"
+                  filtroSaldo === "quitado" ? "Quitado" :
+                    filtroSaldo === "ate_500" ? "Até R$ 500" : "Acima de R$ 500"
               }
               <button type="button" onClick={() => { setFiltroSaldo(""); reset(); }} title="Remover filtro">✕</button>
             </span>
@@ -907,6 +1186,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             <span className="filter-chip">
               Status: {status}
               <button type="button" onClick={() => { setStatus(""); reset(); }} title="Remover filtro">✕</button>
+            </span>
+          )}
+          {statusMultiplos.length > 0 && (
+            <span className="filter-chip">
+              Status ({statusMultiplos.length}): {statusMultiplos.map(s => TODOS_STATUS.find(x => x.id === s)?.label || s).join(", ")}
+              <button type="button" onClick={limparStatusMultiplos} title="Remover filtro de status">✕</button>
             </span>
           )}
           <button
@@ -935,14 +1220,14 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   filtroCliente
                     ? filtroCliente
                     : filtroScore === "diamante"
-                    ? "🟢 Diamante"
-                    : filtroScore === "regular"
-                    ? "🟡 Regular"
-                    : filtroScore === "risco_alto"
-                    ? "🔴 Risco Alto"
-                    : filtroScore === "fundo_perdido"
-                    ? "⛔ Fundo Perdido"
-                    : ""
+                      ? "🟢 Diamante"
+                      : filtroScore === "regular"
+                        ? "🟡 Regular"
+                        : filtroScore === "risco_alto"
+                          ? "🔴 Risco Alto"
+                          : filtroScore === "fundo_perdido"
+                            ? "⛔ Fundo Perdido"
+                            : ""
                 }
                 onClearFilter={() => {
                   setFiltroCliente("");
@@ -1024,9 +1309,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 isFiltered={Boolean(filtroDivida)}
                 filterLabel={
                   filtroDivida === "ate_200" ? "Até R$ 200" :
-                  filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
-                  filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" :
-                  filtroDivida === "mais_1000" ? "Acima de R$ 1.000" : ""
+                    filtroDivida === "200_500" ? "R$ 200 a R$ 500" :
+                      filtroDivida === "500_1000" ? "R$ 500 a R$ 1.000" :
+                        filtroDivida === "mais_1000" ? "Acima de R$ 1.000" : ""
                 }
                 onClearFilter={() => { setFiltroDivida(""); reset(); }}
                 options={[
@@ -1065,9 +1350,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 isFiltered={Boolean(filtroSaldo)}
                 filterLabel={
                   filtroSaldo === "aberto" ? "Em aberto" :
-                  filtroSaldo === "quitado" ? "Quitado" :
-                  filtroSaldo === "ate_500" ? "Até R$ 500" :
-                  filtroSaldo === "mais_500" ? "Acima de R$ 500" : ""
+                    filtroSaldo === "quitado" ? "Quitado" :
+                      filtroSaldo === "ate_500" ? "Até R$ 500" :
+                        filtroSaldo === "mais_500" ? "Acima de R$ 500" : ""
                 }
                 onClearFilter={() => { setFiltroSaldo(""); reset(); }}
                 options={[
@@ -1088,8 +1373,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                 isFiltered={Boolean(venc)}
                 filterLabel={
                   venc === "vencidas" ? "Vencidas" :
-                  venc === "hoje" ? "Vencem hoje" :
-                  venc === "proximos_7" ? "Próximos 7 dias" : ""
+                    venc === "hoje" ? "Vencem hoje" :
+                      venc === "proximos_7" ? "Próximos 7 dias" : ""
                 }
                 onClearFilter={() => { setVenc(""); reset(); }}
                 options={[
