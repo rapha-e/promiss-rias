@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV, extrairInfoParcelas } from "./lib";
-import type { Row, Status } from "./lib";
+import {
+  LBL, cls, deriveStatus, dt, hoje, mensagemCobranca, money, baixarCSV, extrairInfoParcelas,
+  agruparClientesParaListagem,
+} from "./lib";
+import type { Row, Status, ClienteConsolidado } from "./lib";
 import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog, DesmembrarDialog, VarreduraParcelasDialog } from "./Dialogs";
 
 type Resumo = {
@@ -208,10 +211,38 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     } else {
       query = query.order(sortCol, { ascending: sortAsc });
     }
-    const { data, count: c, error } = await query.order("id").range(page * PS, page * PS + PS - 1);
+    const { data, count: c, error } = await query.order("id").limit(1000);
     if (error) { setError(error.message); return; }
     setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
-  }, [qd, status, ini, fim, sortCol, sortAsc, page, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+  }, [qd, status, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+
+  const clientesConsolidados = useMemo(() => {
+    return agruparClientesParaListagem(rows);
+  }, [rows]);
+
+  const sortedClientes = useMemo(() => {
+    return [...clientesConsolidados].sort((a, b) => {
+      let va: any = a[sortCol as keyof ClienteConsolidado];
+      let vb: any = b[sortCol as keyof ClienteConsolidado];
+      if (sortCol === "status") {
+        va = a.fundo_perdido ? "FUNDO PERDIDO" : a.status;
+        vb = b.fundo_perdido ? "FUNDO PERDIDO" : b.status;
+      }
+      if (va == null && vb == null) return 0;
+      if (va == null) return 1;
+      if (vb == null) return -1;
+      if (typeof va === "string") {
+        const cmp = va.localeCompare(vb, "pt-BR", { sensitivity: "base" });
+        return sortAsc ? cmp : -cmp;
+      }
+      return sortAsc ? va - vb : vb - va;
+    });
+  }, [clientesConsolidados, sortCol, sortAsc]);
+
+  const totalPages = Math.max(1, Math.ceil(sortedClientes.length / PS));
+  const clientesPaginados = useMemo(() => {
+    return sortedClientes.slice(page * PS, (page + 1) * PS);
+  }, [sortedClientes, page]);
 
   // Carrega a classificação real/completa dos clientes presentes na página
   useEffect(() => {
@@ -1093,20 +1124,43 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             </tr>
           </thead>
           <tbody>
-            {rows.map(r => {
-              const cliKey = (r.cliente_nome || "").trim().toUpperCase();
-              const badge = clientScores[cliKey] || getScoreFromLinha(r);
+            {clientesPaginados.map(cli => {
+              const cliKey = cli.cliente_nome.trim().toUpperCase();
+              const badge = clientScores[cliKey] || {
+                selo: cli.fundo_perdido ? "⛔ Fundo Perdido" : cli.status === "NÃO PAGOU" ? "🔴 Risco Alto" : cli.status === "QUITADO" ? "🟢 Diamante" : "🟡 Regular",
+                rotulo: cli.status,
+                cor: cli.fundo_perdido ? "#64748b" : cli.status === "NÃO PAGOU" ? "var(--bad)" : cli.status === "QUITADO" ? "var(--brand)" : "var(--warn)",
+                bgCor: cli.fundo_perdido ? "rgba(100, 116, 139, 0.15)" : cli.status === "NÃO PAGOU" ? "rgba(180, 35, 24, 0.12)" : cli.status === "QUITADO" ? "rgba(10, 124, 76, 0.12)" : "rgba(217, 119, 6, 0.12)",
+              };
+
+              const refRow: Row = cli.proximaPromissoria || cli.todasPromissorias[0] || {
+                id: 0,
+                cliente_nome: cli.cliente_nome,
+                telefone: cli.telefone,
+                divida_total: cli.divida_total,
+                valor_pago: cli.valor_pago,
+                saldo_devedor: cli.saldo_devedor,
+                vencimento: cli.vencimento,
+                parcelas: cli.parcelas_rotulo,
+                status: cli.status,
+                fundo_perdido: cli.fundo_perdido,
+                fundo_perdido_motivo: null,
+                fundo_perdido_em: null,
+                ano: null,
+              };
+
               return (
-                <tr key={r.id}>
-                  <td className={`s-${cls(deriveStatus(r))}`}>
+                <tr key={cli.cliente_nome}>
+                  <td className={`s-${cls(cli.status)}`}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                       <button
                         type="button"
                         className="link-cli"
-                        title={`Ver todas as promissórias de ${r.cliente_nome}`}
-                        onClick={() => setFichaCliente({ cliente: r.cliente_nome, telefone: r.telefone })}
+                        title={`Ver detalhes e parcelamentos de ${cli.cliente_nome}`}
+                        onClick={() => setFichaCliente({ cliente: cli.cliente_nome, telefone: cli.telefone })}
+                        style={{ fontWeight: 600 }}
                       >
-                        {r.cliente_nome}
+                        {cli.cliente_nome}
                       </button>
                       <span
                         style={{
@@ -1122,58 +1176,81 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       >
                         {badge.selo}
                       </span>
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: "var(--brand)",
+                          padding: "2px 8px",
+                          background: "rgba(10, 124, 76, 0.1)",
+                          borderRadius: 6,
+                          border: "1px solid rgba(10, 124, 76, 0.25)",
+                          letterSpacing: "0.2px",
+                        }}
+                        title={`Dívida atual dividida em ${cli.parcelas_rotulo}`}
+                      >
+                        {cli.parcelas_rotulo}
+                      </span>
+                      {cli.temMultiplasComprasAbertas && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: 99,
+                            background: "#fef3c7",
+                            color: "#b45309",
+                            border: "1px solid #fde68a",
+                            whiteSpace: "nowrap",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => setFichaCliente({ cliente: cli.cliente_nome, telefone: cli.telefone })}
+                          title={`Este cliente possui ${cli.qtdComprasAbertas} compras/parcelamentos em aberto. Clique no nome para ver cada compra separadamente.`}
+                        >
+                          🏷️ +{cli.qtdComprasAbertas - 1} compra{cli.qtdComprasAbertas > 2 ? "s" : ""} ativa{cli.qtdComprasAbertas > 2 ? "s" : ""}
+                        </span>
+                      )}
                     </div>
                   </td>
-                  <td className="mono">{r.telefone || "—"}</td>
-                <td className="n">{money(r.divida_total)}</td>
-                <td className="n">{money(r.valor_pago)}</td>
-                <td className="n"><b>{money(r.saldo_devedor)}</b></td>
-                <td><VencCell r={r} /></td>
-                <td><StatusPill r={r} />{r.fundo_perdido && r.fundo_perdido_motivo && <div className="sub" title={r.fundo_perdido_motivo}>{r.fundo_perdido_motivo.slice(0, 28)}</div>}</td>
-                <td className="acts">
-                    {isAdmin && !r.fundo_perdido && r.saldo_devedor > 0 && (
-                      <button className="btn-baixa" onClick={() => setBaixa(r)} title="Registrar baixa / pagamento">
+                  <td className="mono">{cli.telefone || "—"}</td>
+                  <td className="n">{money(cli.divida_total)}</td>
+                  <td className="n">{money(cli.valor_pago)}</td>
+                  <td className="n"><b>{money(cli.saldo_devedor)}</b></td>
+                  <td><VencCell r={refRow} /></td>
+                  <td><StatusPill r={refRow} /></td>
+                  <td className="acts">
+                    {isAdmin && !cli.fundo_perdido && cli.saldo_devedor > 0 && cli.proximaPromissoria && (
+                      <button className="btn-baixa" onClick={() => setBaixa(cli.proximaPromissoria!)} title="Registrar baixa da próxima parcela">
                         Baixar
                       </button>
                     )}
-                    {isAdmin && r.saldo_devedor > 0 && extrairInfoParcelas(r.parcelas).ehCarnetAgrupado && extrairInfoParcelas(r.parcelas).totalParcelas > 1 && !r.fundo_perdido && (
-                      <button
-                        className="ed"
-                        onClick={() => setDesmembrarRow(r)}
-                        title="Desmembrar este carnê em parcelas mensais individuais"
-                        style={{ color: "var(--brand)", fontWeight: 600 }}
-                      >
-                        Desmembrar
-                      </button>
-                    )}
-                    {r.valor_pago > 0 && (
-                      <button className="ed" onClick={() => setLogRow(r)} title="Ver histórico e auditoria de pagamento">
-                        Log
-                      </button>
-                    )}
-                    {!r.fundo_perdido && r.saldo_devedor > 0 && (
-                      <button className="ed" onClick={() => setWhats(r)} title="Cobrar por WhatsApp">
+                    {!cli.fundo_perdido && cli.saldo_devedor > 0 && (
+                      <button className="ed" onClick={() => setWhats(refRow)} title="Cobrar por WhatsApp">
                         Whats
                       </button>
                     )}
-                    {isAdmin && <button className="ed" onClick={() => setEditing(r)} title="Editar promissória">Editar</button>}
-                    {isAdmin && (r.fundo_perdido || r.saldo_devedor > 0) && (
-                      <button className="ed" onClick={() => setPerdido(r)} title={r.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
-                        {r.fundo_perdido ? "Desfazer" : "F. Perdido"}
+                    {isAdmin && (
+                      <button className="ed" onClick={() => setEditing(refRow)} title="Editar dados da promissória">
+                        Editar
+                      </button>
+                    )}
+                    {isAdmin && (cli.fundo_perdido || cli.saldo_devedor > 0) && (
+                      <button className="ed" onClick={() => setPerdido(refRow)} title={cli.fundo_perdido ? "Desfazer fundo perdido" : "Marcar como fundo perdido"}>
+                        {cli.fundo_perdido ? "Desfazer" : "F. Perdido"}
                       </button>
                     )}
                   </td>
                 </tr>
               );
             })}
-            {!rows.length && <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--mut)", padding: 30 }}>Nenhum registro encontrado.</td></tr>}
+            {!clientesPaginados.length && <tr><td colSpan={8} style={{ textAlign: "center", color: "var(--mut)", padding: 30 }}>Nenhum cliente encontrado.</td></tr>}
           </tbody>
         </table>
       </div>
       <div className="pager">
-        <span>{count.toLocaleString("pt-BR")} registros · página {page + 1} de {pages}</span>
+        <span>{sortedClientes.length.toLocaleString("pt-BR")} clientes · página {page + 1} de {totalPages}</span>
         <button className="btn ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>←</button>
-        <button className="btn ghost" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>→</button>
+        <button className="btn ghost" disabled={page >= totalPages - 1} onClick={() => setPage(page + 1)}>→</button>
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
       {desmembrarRow && (

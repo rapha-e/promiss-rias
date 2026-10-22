@@ -482,6 +482,245 @@ export function identificarCompraAtual(rows: Row[]): CompraAtualInfo {
   };
 }
 
+export interface CompraGrupo {
+  id: string;
+  titulo: string;
+  rotuloParcelas: string; // Ex: "16x"
+  totalParcelas: number;
+  dividaTotal: number;
+  valorPago: number;
+  saldoDevedor: number;
+  parcelasPagas: number;
+  parcelasAbertas: number;
+  proximoVencimento: string | null;
+  status: Status;
+  promissorias: Row[];
+  proximaPromissoria: Row | null;
+  emAberto: boolean;
+}
+
+export interface ClienteConsolidado {
+  cliente_nome: string;
+  telefone: string;
+  compras: CompraGrupo[];
+  compraPrincipal: CompraGrupo;
+  temMultiplasComprasAbertas: boolean;
+  qtdComprasAbertas: number;
+  // Valores da compra atual / principal
+  divida_total: number;
+  valor_pago: number;
+  saldo_devedor: number;
+  parcelas_rotulo: string; // Ex: "16x"
+  vencimento: string | null;
+  status: Status;
+  proximaPromissoria: Row | null;
+  fundo_perdido: boolean;
+  todasPromissorias: Row[];
+}
+
+/**
+ * Separa com precisão as diferentes compras/parcelamentos de um cliente,
+ * isolando carnês desmembrados (ex: 16x, 10x), compras avulsas e compras quitadas.
+ */
+export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
+  if (!rows || rows.length === 0) return [];
+
+  // Agrupar carnês desmembrados por denominador Y
+  const carnesMap = new Map<number, Row[]>();
+  const avulsas: Row[] = [];
+
+  for (const r of rows) {
+    const m = (r.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+    if (m) {
+      const denom = parseInt(m[2], 10);
+      if (!carnesMap.has(denom)) carnesMap.set(denom, []);
+      carnesMap.get(denom)!.push(r);
+    } else {
+      avulsas.push(r);
+    }
+  }
+
+  const compras: CompraGrupo[] = [];
+
+  for (const [denom, carnetRows] of carnesMap.entries()) {
+    carnetRows.sort((a, b) => {
+      const na = parseInt((a.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+      const nb = parseInt((b.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+      return na - nb;
+    });
+
+    const abertas = carnetRows.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) > 0);
+    const pagas = carnetRows.filter(r => (r.saldo_devedor ?? 0) <= 0);
+
+    let dividaTotal = carnetRows.reduce((s, r) => s + (r.divida_total ?? 0), 0);
+    let valorPago = carnetRows.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+    const saldoDevedor = carnetRows.reduce((s, r) => s + (r.fundo_perdido ? 0 : (r.saldo_devedor ?? 0)), 0);
+
+    // Se temos apenas as parcelas abertas no array (ex: 6/16 a 16/16), inferimos as parcelas 1 a 5 pagas
+    if (abertas.length > 0 && pagas.length === 0) {
+      const minNum = parseInt((abertas[0].parcelas || "").match(/^(\d+)/)?.[1] || "1", 10);
+      if (minNum > 1) {
+        const parcelasPagasQtd = minNum - 1;
+        const valorUnitario = abertas[0].divida_total || 0;
+        dividaTotal = denom * valorUnitario;
+        valorPago = parcelasPagasQtd * valorUnitario + abertas.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+      }
+    }
+
+    let proximoVencimento: string | null = null;
+    let proximaPromissoria: Row | null = null;
+    if (abertas.length > 0) {
+      const abertasSorted = [...abertas].sort((a, b) => (a.vencimento ?? "").localeCompare(b.vencimento ?? ""));
+      proximoVencimento = abertasSorted[0].vencimento;
+      proximaPromissoria = abertasSorted[0];
+    } else if (carnetRows.length > 0) {
+      proximoVencimento = carnetRows[carnetRows.length - 1].vencimento;
+    }
+
+    const st = deriveStatus({
+      divida_total: dividaTotal,
+      valor_pago: valorPago,
+      saldo_devedor: saldoDevedor,
+      vencimento: proximoVencimento,
+      fundo_perdido: carnetRows.every(r => r.fundo_perdido),
+    });
+
+    compras.push({
+      id: `carne_${denom}_${carnetRows[0]?.id || 0}`,
+      titulo: `Carnê em ${denom}x`,
+      rotuloParcelas: `${denom}x`,
+      totalParcelas: denom,
+      dividaTotal,
+      valorPago,
+      saldoDevedor,
+      parcelasPagas: Math.max(pagas.length, denom - abertas.length),
+      parcelasAbertas: abertas.length,
+      proximoVencimento,
+      status: st,
+      promissorias: carnetRows,
+      proximaPromissoria,
+      emAberto: saldoDevedor > 0,
+    });
+  }
+
+  for (const r of avulsas) {
+    const info = extrairInfoParcelas(r.parcelas, r.divida_total);
+    const emAberto = (r.saldo_devedor ?? 0) > 0;
+    const st = deriveStatus(r);
+    const rotulo = info.totalParcelas > 1 ? `${info.totalParcelas}x` : "1x";
+    const titulo = info.totalParcelas > 1 ? `Compra em ${info.totalParcelas}x` : "Promissória Única";
+
+    compras.push({
+      id: `avulsa_${r.id}`,
+      titulo,
+      rotuloParcelas: rotulo,
+      totalParcelas: info.totalParcelas,
+      dividaTotal: r.divida_total,
+      valorPago: r.valor_pago,
+      saldoDevedor: r.fundo_perdido ? 0 : r.saldo_devedor,
+      parcelasPagas: emAberto ? 0 : 1,
+      parcelasAbertas: emAberto ? 1 : 0,
+      proximoVencimento: r.vencimento,
+      status: st,
+      promissorias: [r],
+      proximaPromissoria: emAberto ? r : null,
+      emAberto,
+    });
+  }
+
+  compras.sort((a, b) => {
+    if (a.emAberto !== b.emAberto) return a.emAberto ? -1 : 1;
+    if (a.emAberto) {
+      if (a.proximoVencimento && b.proximoVencimento) {
+        return a.proximoVencimento.localeCompare(b.proximoVencimento);
+      }
+      return b.saldoDevedor - a.saldoDevedor;
+    }
+    return (b.proximoVencimento ?? "").localeCompare(a.proximoVencimento ?? "");
+  });
+
+  return compras;
+}
+
+/**
+ * Consolida as informações de um cliente para exibição de uma única linha na tabela,
+ * destacando sua compra atual em aberto sem misturar compras anteriores.
+ */
+export function consolidarCliente(clienteNome: string, telefone: string, rows: Row[]): ClienteConsolidado {
+  const compras = separarComprasCliente(rows);
+  const comprasAbertas = compras.filter(c => c.emAberto);
+  const temMultiplasComprasAbertas = comprasAbertas.length > 1;
+  const qtdComprasAbertas = comprasAbertas.length;
+
+  const compraPrincipal: CompraGrupo = comprasAbertas[0] || compras[0] || {
+    id: "vazio",
+    titulo: "Sem compras",
+    rotuloParcelas: "1x",
+    totalParcelas: 1,
+    dividaTotal: 0,
+    valorPago: 0,
+    saldoDevedor: 0,
+    parcelasPagas: 0,
+    parcelasAbertas: 0,
+    proximoVencimento: null,
+    status: "QUITADO",
+    promissorias: [],
+    proximaPromissoria: null,
+    emAberto: false,
+  };
+
+  return {
+    cliente_nome: clienteNome,
+    telefone: telefone || compraPrincipal.promissorias.find(p => p.telefone)?.telefone || "",
+    compras,
+    compraPrincipal,
+    temMultiplasComprasAbertas,
+    qtdComprasAbertas,
+    divida_total: compraPrincipal.dividaTotal,
+    valor_pago: compraPrincipal.valorPago,
+    saldo_devedor: compraPrincipal.saldoDevedor,
+    parcelas_rotulo: compraPrincipal.rotuloParcelas,
+    vencimento: compraPrincipal.proximoVencimento,
+    status: compraPrincipal.status,
+    proximaPromissoria: compraPrincipal.proximaPromissoria,
+    fundo_perdido: rows.length > 0 && rows.every(r => r.fundo_perdido),
+    todasPromissorias: rows,
+  };
+}
+
+/**
+ * Agrupa uma lista de promissórias em clientes consolidados únicos.
+ */
+export function agruparClientesParaListagem(rows: Row[]): ClienteConsolidado[] {
+  if (!rows || rows.length === 0) return [];
+
+  const grupos = new Map<string, { nome: string; tel: string; promissorias: Row[] }>();
+
+  for (const r of rows) {
+    const rawNome = (r.cliente_nome || "").trim();
+    if (!rawNome) continue;
+    const key = rawNome.toUpperCase();
+
+    if (!grupos.has(key)) {
+      grupos.set(key, {
+        nome: rawNome,
+        tel: r.telefone || "",
+        promissorias: [],
+      });
+    }
+    const g = grupos.get(key)!;
+    g.promissorias.push(r);
+    if (!g.tel && r.telefone) g.tel = r.telefone;
+  }
+
+  const consolidados: ClienteConsolidado[] = [];
+  for (const g of grupos.values()) {
+    consolidados.push(consolidarCliente(g.nome, g.tel, g.promissorias));
+  }
+
+  return consolidados;
+}
+
 /**
  * Gera mensagem de comprovante para envio no WhatsApp após registro de baixa.
  * Contém: nome do pagador, valor total da compra em X vezes, valor pago, parcela paga, valor restante e data de pagamento.

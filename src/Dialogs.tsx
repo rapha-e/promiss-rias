@@ -6,9 +6,9 @@ import {
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses,
-  identificarCompraAtual,
+  identificarCompraAtual, separarComprasCliente,
 } from "./lib";
-import type { Row, CreditScoreInfo } from "./lib";
+import type { Row, CreditScoreInfo, CompraGrupo } from "./lib";
 import { SortIcon } from "./SortIcon";
 
 export function Painel({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) {
@@ -844,18 +844,46 @@ export function FichaCliente({
 
   const tel = telefone || rows.find(r => r.telefone)?.telefone || "";
   const abertos = rows.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
-  const compraInfo = useMemo(() => identificarCompraAtual(rows), [rows]);
-  const [filtroAba, setFiltroAba] = useState<"compra_atual" | "quitadas" | "todas">("compra_atual");
+  const comprasCliente = useMemo(() => separarComprasCliente(rows), [rows]);
+  const comprasAbertas = useMemo(() => comprasCliente.filter(c => c.emAberto), [comprasCliente]);
+  const comprasQuitadas = useMemo(() => comprasCliente.filter(c => !c.emAberto), [comprasCliente]);
+
+  const [filtroAba, setFiltroAba] = useState<"compra_ativa" | "quitadas" | "todas">("compra_ativa");
+  const [compraIdSelecionada, setCompraIdSelecionada] = useState<string>("");
+
+  useEffect(() => {
+    if (comprasAbertas.length > 0) {
+      if (!compraIdSelecionada || !comprasCliente.some(c => c.id === compraIdSelecionada)) {
+        setCompraIdSelecionada(comprasAbertas[0].id);
+      }
+    } else if (comprasCliente.length > 0 && !compraIdSelecionada) {
+      setCompraIdSelecionada(comprasCliente[0].id);
+    }
+  }, [comprasCliente, comprasAbertas, compraIdSelecionada]);
+
+  const compraAtiva = useMemo<CompraGrupo | null>(() => {
+    return comprasCliente.find(c => c.id === compraIdSelecionada) || comprasAbertas[0] || comprasCliente[0] || null;
+  }, [comprasCliente, comprasAbertas, compraIdSelecionada]);
+
+  const promissoriasOutras = useMemo(() => {
+    if (!compraAtiva) return [];
+    return rows.filter(r => !compraAtiva.promissorias.some(p => p.id === r.id));
+  }, [rows, compraAtiva]);
+
+  const totalOutrasQuitadas = useMemo(() => {
+    return promissoriasOutras.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
+  }, [promissoriasOutras]);
 
   const rowsFiltradas = useMemo(() => {
-    if (filtroAba === "compra_atual") {
-      return compraInfo.promissoriasCompra.length > 0 ? compraInfo.promissoriasCompra : rows;
+    if (filtroAba === "compra_ativa" && compraAtiva) {
+      return compraAtiva.promissorias;
     }
     if (filtroAba === "quitadas") {
-      return compraInfo.promissoriasOutras.length > 0 ? compraInfo.promissoriasOutras : [];
+      const qRows = comprasQuitadas.flatMap(c => c.promissorias);
+      return qRows.length > 0 ? qRows : promissoriasOutras;
     }
     return rows;
-  }, [filtroAba, compraInfo, rows]);
+  }, [filtroAba, compraAtiva, comprasQuitadas, promissoriasOutras, rows]);
 
   const [sortCol, setSortCol] = useState<string>("vencimento");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
@@ -920,6 +948,22 @@ export function FichaCliente({
               >
                 {score.selo}
               </span>
+              {comprasAbertas.length > 1 && (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: 99,
+                    background: "#fef3c7",
+                    color: "#b45309",
+                    border: "1px solid #fde68a",
+                  }}
+                  title={`Cliente possui ${comprasAbertas.length} compras/parcelamentos em aberto`}
+                >
+                  🏷️ {comprasAbertas.length} compras ativas
+                </span>
+              )}
             </div>
             <div className="sub mono">
               {tel || "Sem telefone"} · <span style={{ color: "var(--ink)", fontWeight: 500 }}>{score.recomendacaoVenda}</span>
@@ -929,56 +973,100 @@ export function FichaCliente({
           <button className="btn ghost" onClick={onClose}>Fechar</button>
         </div>
         {err && <div className="err">{err}</div>}
+
+        {comprasAbertas.length > 1 && (
+          <div style={{ padding: "8px 12px", background: "#fef3c7", borderRadius: 8, border: "1px solid #fde68a", fontSize: 12, color: "#92400e", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <span>🏷️</span>
+            <span><b>Múltiplos parcelamentos em aberto:</b> este cliente possui <b>{comprasAbertas.length} compras ativas</b>. Selecione uma compra abaixo para visualizar seu parcelamento isolado:</span>
+          </div>
+        )}
+
         <div className="kpis" style={{ margin: 0 }}>
           <div className="card hl">
             <small>SALDO A RECEBER</small>
-            <b>{money(compraInfo.saldoReceberVendaAtual)}</b>
+            <b>{money(compraAtiva?.saldoDevedor ?? 0)}</b>
           </div>
           <div className="card">
             <small>TOTAL DA VENDA ATUAL</small>
-            <b>{money(compraInfo.totalVendaAtual)}</b>
+            <b>{money(compraAtiva?.dividaTotal ?? 0)}</b>
           </div>
           <div className="card">
             <small>VALOR PAGO (VENDA ATUAL)</small>
-            <b>{money(compraInfo.valorPagoVendaAtual)}</b>
+            <b>{money(compraAtiva?.valorPago ?? 0)}</b>
           </div>
           <div className="card">
             <small>PARCELAS DA VENDA ATUAL</small>
-            <b>{compraInfo.totalParcelasCompra}</b>
-            {compraInfo.totalOutrasQuitadas > 0 ? (
+            <b>{compraAtiva?.totalParcelas ?? 0}</b>
+            {totalOutrasQuitadas > 0 ? (
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
-                ✓ {money(compraInfo.totalOutrasQuitadas)} quitados em compras anteriores
+                ✓ {money(totalOutrasQuitadas)} quitados em compras anteriores
               </span>
-            ) : compraInfo.parcelasPagasCompra > 0 ? (
+            ) : (compraAtiva?.parcelasPagas ?? 0) > 0 ? (
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
-                ✓ {compraInfo.parcelasPagasCompra} pagas · {compraInfo.parcelasAbertasCompra} em aberto
+                ✓ {compraAtiva?.parcelasPagas} pagas · {compraAtiva?.parcelasAbertas} em aberto
               </span>
             ) : null}
           </div>
         </div>
 
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 2, marginBottom: -4 }}>
-          <button
-            type="button"
-            onClick={() => setFiltroAba("compra_atual")}
-            style={{
-              padding: "6px 14px",
-              borderRadius: 99,
-              fontSize: 12,
-              fontWeight: 700,
-              cursor: "pointer",
-              border: filtroAba === "compra_atual" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
-              background: filtroAba === "compra_atual" ? "var(--brand)" : "var(--panel)",
-              color: filtroAba === "compra_atual" ? "#fff" : "var(--ink)",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              transition: "all 0.15s ease",
-            }}
-          >
-            <span>🟢</span> Venda Atual / Em Aberto ({compraInfo.parcelasAbertasCompra} {compraInfo.parcelasAbertasCompra === 1 ? "parcela" : "parcelas"})
-          </button>
-          {compraInfo.qtdOutrasQuitadas > 0 && (
+          {comprasAbertas.length > 1 ? (
+            comprasAbertas.map((c, idx) => {
+              const ativo = filtroAba === "compra_ativa" && compraAtiva?.id === c.id;
+              return (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    setFiltroAba("compra_ativa");
+                    setCompraIdSelecionada(c.id);
+                  }}
+                  style={{
+                    padding: "6px 14px",
+                    borderRadius: 99,
+                    fontSize: 12,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    border: ativo ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+                    background: ativo ? "var(--brand)" : "var(--panel)",
+                    color: ativo ? "#fff" : "var(--ink)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    transition: "all 0.15s ease",
+                  }}
+                >
+                  <span>🟢</span> Compra {idx + 1}: {c.titulo} ({c.parcelasAbertas} {c.parcelasAbertas === 1 ? "parcela" : "parcelas"} · {money(c.saldoDevedor)})
+                </button>
+              );
+            })
+          ) : (
+            <button
+              type="button"
+              onClick={() => {
+                setFiltroAba("compra_ativa");
+                if (comprasAbertas[0]) setCompraIdSelecionada(comprasAbertas[0].id);
+              }}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 99,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: filtroAba === "compra_ativa" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+                background: filtroAba === "compra_ativa" ? "var(--brand)" : "var(--panel)",
+                color: filtroAba === "compra_ativa" ? "#fff" : "var(--ink)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>🟢</span> Venda Atual / Em Aberto ({compraAtiva?.parcelasAbertas ?? abertos.length} {((compraAtiva?.parcelasAbertas ?? abertos.length) === 1) ? "parcela" : "parcelas"})
+            </button>
+          )}
+
+          {comprasQuitadas.length > 0 && (
             <button
               type="button"
               onClick={() => setFiltroAba("quitadas")}
@@ -997,9 +1085,10 @@ export function FichaCliente({
                 transition: "all 0.15s ease",
               }}
             >
-              <span>✓</span> Vendas Já Quitadas ({compraInfo.qtdOutrasQuitadas})
+              <span>✓</span> Vendas Já Quitadas ({comprasQuitadas.reduce((s, c) => s + c.promissorias.length, 0)})
             </button>
           )}
+
           <button
             type="button"
             onClick={() => setFiltroAba("todas")}
