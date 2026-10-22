@@ -1449,15 +1449,23 @@ export function BaixaDialog({
       }
 
       // Calcular saldo restante e gerar mensagem de comprovante para o WhatsApp
+      const saldoOutrasAbertas = outras.reduce((acc, r) => acc + r.saldo_devedor, 0);
+      const saldoDestaRestante = Math.max(0, row.saldo_devedor - V);
+
       const valorRestanteFinal = temRateio
         ? saldoRestante
         : (parcelasRateio.length === 0 && V < row.saldo_devedor && opcaoSemRestantes === "quitar"
           ? 0
-          : Math.max(0, row.saldo_devedor - V));
+          : saldoDestaRestante + saldoOutrasAbertas);
 
       const proximasParcelasInfo = temRateio && saldoRestante > 0
         ? simulacao.map(item => ({ parcela: item.parcelas, valor: item.novoSaldo, vencimento: item.vencimento }))
-        : undefined;
+        : (valorRestanteFinal > 0 && outras.length > 0
+          ? [
+              ...(saldoDestaRestante > 0 ? [{ parcela: row.parcelas, valor: saldoDestaRestante, vencimento: row.vencimento }] : []),
+              ...outras.map(item => ({ parcela: item.parcelas, valor: item.saldo_devedor, vencimento: item.vencimento }))
+            ]
+          : (saldoDestaRestante > 0 ? [{ parcela: row.parcelas, valor: saldoDestaRestante, vencimento: row.vencimento }] : undefined));
 
       const textoComprovante = mensagemComprovanteBaixa({
         nome: row.cliente_nome,
