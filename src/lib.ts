@@ -555,8 +555,25 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
     const valorUnitario = carnetRows[0]?.divida_total || 0;
     const somaDividaReal = carnetRows.reduce((s, r) => s + (r.divida_total ?? 0), 0);
     const dividaTotal = Math.max(somaDividaReal, denom * valorUnitario);
-    const saldoDevedor = carnetRows.reduce((s, r) => s + (r.fundo_perdido ? 0 : (r.saldo_devedor ?? 0)), 0);
-    const valorPago = Math.max(carnetRows.reduce((s, r) => s + (r.valor_pago ?? 0), 0), Math.max(0, dividaTotal - saldoDevedor));
+
+    // Identificar quais números de parcelas estão presentes
+    const nums = carnetRows.map(r => parseInt((r.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10)).filter(n => n > 0);
+    const minNum = nums.length > 0 ? Math.min(...nums) : 1;
+    const maxNum = nums.length > 0 ? Math.max(...nums) : denom;
+
+    // Se minNum > 1, as parcelas 1..(minNum - 1) não estão presentes e foram quitadas no passado (legado)
+    const parcelasAnterioresQuitadas = Math.max(0, minNum - 1);
+    const valorPagoAnterior = parcelasAnterioresQuitadas * valorUnitario;
+
+    // Se maxNum < denom, as parcelas futuras ainda existem e continuam em aberto
+    const parcelasPosterioresAbertas = Math.max(0, denom - maxNum);
+    const saldoPosteriorAberto = parcelasPosterioresAbertas * valorUnitario;
+
+    const saldoPresente = carnetRows.reduce((s, r) => s + (r.fundo_perdido ? 0 : (r.saldo_devedor ?? 0)), 0);
+    const saldoDevedor = saldoPresente + saldoPosteriorAberto;
+
+    const pagoPresente = carnetRows.reduce((s, r) => s + (r.valor_pago ?? 0), 0);
+    const valorPago = pagoPresente + valorPagoAnterior;
 
     let proximoVencimento: string | null = null;
     let proximaPromissoria: Row | null = null;

@@ -119,6 +119,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [varreduraOpen, setVarreduraOpen] = useState(false);
   const [error, setError] = useState("");
   const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
+  const [nomesFiltrados, setNomesFiltrados] = useState<string[] | null>(null);
+  const [promissoriasFiltroMap, setPromissoriasFiltroMap] = useState<Map<string, Row>>(new Map());
 
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
@@ -195,6 +197,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       if (qErr) { setError(qErr.message); return; }
       // Exclui clientes com débitos em aberto (evita que cliente com parcelas atrasadas ou a vencer apareça no Quitado)
       const limpas = (qData ?? []).filter(r => !setAbertos.has(r.cliente_nome.trim().toUpperCase()));
+      setNomesFiltrados(null);
+      setPromissoriasFiltroMap(new Map());
       setError(""); setRows(limpas as Row[]); setCount(limpas.length);
       return;
     }
@@ -215,6 +219,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         ...(r4.data || []),
         ...(rQuit.data || [])
       ];
+      setNomesFiltrados(null);
+      setPromissoriasFiltroMap(new Map());
       setError(""); setRows(uniao as Row[]); setCount(uniao.length);
       return;
     }
@@ -301,7 +307,44 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     }
     const { data, count: c, error } = await query.order("id").limit(2000);
     if (error) { setError(error.message); return; }
-    setError(""); setRows((data ?? []) as Row[]); setCount(c ?? 0);
+
+    const temFiltroRestritivo = Boolean(venc || ini || fim || status || statusMultiplos.length > 0 || filtroScore || filtroDivida || filtroPago || filtroSaldo);
+    const nomesAlvo = Array.from(new Set((data || []).map(r => (r.cliente_nome || "").trim()))).filter(Boolean);
+
+    if (temFiltroRestritivo && nomesAlvo.length > 0) {
+      const mapaFiltro = new Map<string, Row>();
+      for (const r of (data || [])) {
+        const k = (r.cliente_nome || "").trim().toUpperCase();
+        if (!mapaFiltro.has(k)) mapaFiltro.set(k, r);
+      }
+
+      // Buscar todas as promissórias desses clientes para que o consolidado calcule
+      // Dívida Total, Valor Pago e Saldo Devedor com 100% de precisão idêntico ao detalhado
+      const CHUNK_SIZE = 50;
+      const promissoriasCompletas: Row[] = [];
+      for (let i = 0; i < nomesAlvo.length; i += CHUNK_SIZE) {
+        const chunk = nomesAlvo.slice(i, i + CHUNK_SIZE);
+        const { data: cData, error: cErr } = await supabase
+          .from("promissorias")
+          .select("*")
+          .in("cliente_nome", chunk);
+        if (!cErr && cData) {
+          promissoriasCompletas.push(...(cData as Row[]));
+        }
+      }
+
+      setNomesFiltrados(nomesAlvo.map(n => n.toUpperCase()));
+      setPromissoriasFiltroMap(mapaFiltro);
+      setError("");
+      setRows(promissoriasCompletas.length > 0 ? promissoriasCompletas : ((data ?? []) as Row[]));
+      setCount(nomesAlvo.length);
+    } else {
+      setNomesFiltrados(null);
+      setPromissoriasFiltroMap(new Map());
+      setError("");
+      setRows((data ?? []) as Row[]);
+      setCount(c ?? 0);
+    }
   }, [qd, status, statusMultiplos, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
 
   const toggleStatusMultiplo = (st: Status) => {
@@ -333,7 +376,10 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
 
   const clientesConsolidados = useMemo(() => {
     let list = agruparClientesParaListagem(rows);
-    if (statusMultiplos.length > 0) {
+    if (nomesFiltrados && nomesFiltrados.length > 0) {
+      const setNomes = new Set(nomesFiltrados);
+      list = list.filter(cli => setNomes.has(cli.cliente_nome.trim().toUpperCase()));
+    } else if (statusMultiplos.length > 0) {
       list = list.filter(cli => statusMultiplos.includes(cli.status));
     } else if (status) {
       if (status === "ABERTO") {
@@ -347,7 +393,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       }
     }
     return list;
-  }, [rows, statusMultiplos, status]);
+  }, [rows, nomesFiltrados, statusMultiplos, status]);
 
   const sortedClientes = useMemo(() => {
     return [...clientesConsolidados].sort((a, b) => {
@@ -358,7 +404,14 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       }
       let va: any = a[sortCol as keyof ClienteConsolidado];
       let vb: any = b[sortCol as keyof ClienteConsolidado];
-      if (sortCol === "status") {
+      if (sortCol === "vencimento") {
+        const kA = a.cliente_nome.trim().toUpperCase();
+        const kB = b.cliente_nome.trim().toUpperCase();
+        const rA = promissoriasFiltroMap.get(kA);
+        const rB = promissoriasFiltroMap.get(kB);
+        va = (rA && (rA.saldo_devedor ?? 0) > 0) ? rA.vencimento : a.vencimento;
+        vb = (rB && (rB.saldo_devedor ?? 0) > 0) ? rB.vencimento : b.vencimento;
+      } else if (sortCol === "status") {
         va = a.fundo_perdido ? "FUNDO PERDIDO" : a.status;
         vb = b.fundo_perdido ? "FUNDO PERDIDO" : b.status;
       }
@@ -1533,21 +1586,24 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   : "rgba(217, 119, 6, 0.12)",
               };
 
-              const refRow: Row = cli.proximaPromissoria || cli.todasPromissorias[0] || {
-                id: 0,
-                cliente_nome: cli.cliente_nome,
-                telefone: cli.telefone,
-                divida_total: cli.divida_total,
-                valor_pago: cli.valor_pago,
-                saldo_devedor: cli.saldo_devedor,
-                vencimento: cli.vencimento,
-                parcelas: cli.parcelas_rotulo,
-                status: cli.status,
-                fundo_perdido: cli.fundo_perdido,
-                fundo_perdido_motivo: null,
-                fundo_perdido_em: null,
-                ano: null,
-              };
+              const promissoriaDoFiltro = promissoriasFiltroMap.get(cliKey);
+              const refRow: Row = (promissoriaDoFiltro && (promissoriaDoFiltro.saldo_devedor ?? 0) > 0)
+                ? promissoriaDoFiltro
+                : (cli.proximaPromissoria || cli.todasPromissorias[0] || {
+                    id: 0,
+                    cliente_nome: cli.cliente_nome,
+                    telefone: cli.telefone,
+                    divida_total: cli.divida_total,
+                    valor_pago: cli.valor_pago,
+                    saldo_devedor: cli.saldo_devedor,
+                    vencimento: cli.vencimento,
+                    parcelas: cli.parcelas_rotulo,
+                    status: cli.status,
+                    fundo_perdido: cli.fundo_perdido,
+                    fundo_perdido_motivo: null,
+                    fundo_perdido_em: null,
+                    ano: null,
+                  });
 
               return (
                 <tr key={cli.cliente_nome}>
@@ -1619,8 +1675,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                   <td><VencCell r={refRow} /></td>
                   <td><StatusPill r={refRow} /></td>
                   <td className="acts">
-                    {isAdmin && !cli.fundo_perdido && cli.saldo_devedor > 0 && cli.proximaPromissoria && (
-                      <button className="btn-baixa" onClick={() => setBaixa(cli.proximaPromissoria!)} title="Registrar baixa da próxima parcela">
+                    {isAdmin && !cli.fundo_perdido && cli.saldo_devedor > 0 && (refRow.id > 0 || cli.proximaPromissoria) && (
+                      <button
+                        className="btn-baixa"
+                        onClick={() => setBaixa(refRow.id > 0 ? refRow : cli.proximaPromissoria!)}
+                        title="Registrar baixa desta parcela"
+                      >
                         Baixar
                       </button>
                     )}
