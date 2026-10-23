@@ -39,6 +39,12 @@ export const LBL: Record<Status, string> = {
   "FUNDO PERDIDO": "Fundo perdido"
 };
 export const cls = (s: Status) => (s === "A VENCER" ? "VENCER" : s.split(" ")[0]);
+
+/** Identifica se uma promissória foi baixada por Acordo de Repactuação (novação de dívida) */
+export function ehRepactuada(r: { origem?: string | null }): boolean {
+  if (!r || !r.origem) return false;
+  return r.origem.includes("REPACTUACAO_BAIXA") || r.origem.includes("Acordo de Repactuação");
+}
 export const dt = (d: string | null | undefined) => {
   if (!d) return "Sem vencimento";
   const str = String(d).trim();

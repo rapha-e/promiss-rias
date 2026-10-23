@@ -7,7 +7,7 @@ import {
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses, ajustarApenasDia,
   identificarCompraAtual, separarComprasCliente,
-  formatarMascaraMoeda, desmascararMoeda,
+  formatarMascaraMoeda, desmascararMoeda, ehRepactuada,
 } from "./lib";
 import type { Row, CreditScoreInfo, CompraGrupo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -21,6 +21,22 @@ export function Painel({ onClose, wide, style, children }: { onClose: () => void
 }
 
 export function StatusPill({ r }: { r: Row }) {
+  if (ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0) {
+    return (
+      <span
+        className="pill"
+        style={{
+          background: "rgba(147, 51, 234, 0.12)",
+          color: "#7e22ce",
+          borderColor: "#a855f7",
+          fontWeight: 700,
+        }}
+        title="Título baixado por Acordo de Repactuação (substituído por novas parcelas)"
+      >
+        🔄 Repactuado
+      </span>
+    );
+  }
   const s = deriveStatus(r);
   return <span className={`pill p-${cls(s)}`}>{LBL[s]}</span>;
 }
@@ -51,7 +67,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [qtd, setQtd] = useState(1);
   const [i, setI] = useState(row?.parcelas ?? "1X");
   const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
-  const [atualizarProximas, setAtualizarProximas] = useState(false);
+  const [atualizarProximas, setAtualizarProximas] = useState(true);
   const [parcelasCarne, setParcelasCarne] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
@@ -77,7 +93,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     let cancelado = false;
     supabase
       .from("promissorias")
-      .select("id, cliente_nome, parcelas, vencimento, saldo_devedor, divida_total, valor_pago")
+      .select("id, cliente_nome, parcelas, vencimento, saldo_devedor, divida_total, valor_pago, origem")
       .ilike("cliente_nome", n.trim())
       .then(({ data }) => {
         if (cancelado || !data) return;
@@ -86,7 +102,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
           return (
             m &&
             parseInt(m[2], 10) === infoCarne.denom &&
-            Math.abs(p.divida_total - (row.divida_total || 0)) <= Math.max(infoCarne.denom, 200)
+            Math.abs(p.divida_total - (row.divida_total || 0)) <= Math.max(infoCarne.denom, 500)
           );
         });
         doCarne.sort((a, b) => {
@@ -368,19 +384,18 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         return setErr("Não foi possível salvar: " + error.message);
       }
 
-      // Repercutir novo dia de vencimento em todas as parcelas do carnê (inclusive quitadas), mantendo meses e anos inalterados
+      // Repercutir novo dia de vencimento em todas as parcelas do carnê (anteriores e posteriores, inclusive quitadas), mantendo meses e anos inalterados
       if (atualizarProximas && infoCarne && d) {
         try {
           const novoDia = parseInt(d.slice(8, 10), 10);
           if (novoDia >= 1 && novoDia <= 31) {
-            let listaAlvo = parcelasCarne;
-            if (!listaAlvo || listaAlvo.length === 0) {
-              const { data: todasDoCliente } = await supabase
-                .from("promissorias")
-                .select("id, parcelas, vencimento, saldo_devedor, divida_total, valor_pago, origem")
-                .ilike("cliente_nome", n.trim());
-              listaAlvo = todasDoCliente || [];
-            }
+            // Busca sempre no Supabase para garantir a lista completa, atualizada e com os logs de origem preservados
+            const { data: todasDoCliente } = await supabase
+              .from("promissorias")
+              .select("id, parcelas, vencimento, saldo_devedor, divida_total, valor_pago, origem")
+              .ilike("cliente_nome", n.trim());
+
+            const listaAlvo = todasDoCliente || parcelasCarne;
 
             for (const pRow of listaAlvo) {
               if (pRow.id === row.id) continue; // Parcela atual já foi salva acima
@@ -388,11 +403,14 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               if (!mP) continue;
               const denomP = parseInt(mP[2], 10);
 
-              // Pertence ao mesmo carnê (mesmo denominador e valor compatível)
+              // Pertence ao mesmo carnê (mesmo número total de parcelas e valor correspondente à compra)
               if (denomP === infoCarne.denom) {
-                const diffValor = Math.abs(pRow.divida_total - T);
-                if (diffValor <= Math.max(denomP, 200) && pRow.vencimento) {
-                  // Mantém o mês e ano da parcela e altera somente o dia
+                const diffValor = Math.min(
+                  Math.abs(pRow.divida_total - (row.divida_total || 0)),
+                  Math.abs(pRow.divida_total - T)
+                );
+                if (diffValor <= Math.max(denomP, 500) && pRow.vencimento) {
+                  // Mantém o mês e ano originais da parcela e altera somente o dia
                   const novoVenc = ajustarApenasDia(pRow.vencimento, novoDia);
 
                   if (novoVenc && novoVenc !== pRow.vencimento) {
@@ -1243,28 +1261,42 @@ export function FichaCliente({
             </button>
           )}
 
-          {comprasQuitadas.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setFiltroAba("quitadas")}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 99,
-                fontSize: 12,
-                fontWeight: 700,
-                cursor: "pointer",
-                border: filtroAba === "quitadas" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
-                background: filtroAba === "quitadas" ? "var(--brand)" : "var(--panel)",
-                color: filtroAba === "quitadas" ? "#fff" : "var(--ink)",
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                transition: "all 0.15s ease",
-              }}
-            >
-              <span>✓</span> Vendas Já Quitadas ({comprasQuitadas.reduce((s, c) => s + c.promissorias.length, 0)})
-            </button>
-          )}
+          {comprasQuitadas.length > 0 && (() => {
+            const todasRepactuadas = comprasQuitadas.every(c => c.promissorias.every(ehRepactuada));
+            const temRepactuada = comprasQuitadas.some(c => c.promissorias.some(ehRepactuada));
+            const totalQtd = comprasQuitadas.reduce((s, c) => s + c.promissorias.length, 0);
+            return (
+              <button
+                type="button"
+                onClick={() => setFiltroAba("quitadas")}
+                style={{
+                  padding: "6px 14px",
+                  borderRadius: 99,
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  border: filtroAba === "quitadas"
+                    ? (todasRepactuadas ? "1.5px solid #a855f7" : "1.5px solid var(--brand)")
+                    : "1px solid var(--line)",
+                  background: filtroAba === "quitadas"
+                    ? (todasRepactuadas ? "#7e22ce" : "var(--brand)")
+                    : "var(--panel)",
+                  color: filtroAba === "quitadas" ? "#fff" : (todasRepactuadas ? "#7e22ce" : "var(--ink)"),
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 6,
+                  transition: "all 0.15s ease",
+                }}
+              >
+                <span>{todasRepactuadas ? "🔄" : "✓"}</span>{" "}
+                {todasRepactuadas
+                  ? `Vendas Repactuadas (${totalQtd})`
+                  : temRepactuada
+                  ? `Quitadas / Repactuadas (${totalQtd})`
+                  : `Vendas Já Quitadas (${totalQtd})`}
+              </button>
+            );
+          })()}
 
           <button
             type="button"

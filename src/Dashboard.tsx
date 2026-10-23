@@ -237,7 +237,12 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               if (Array.isArray(parsed)) {
                 for (const item of parsed) {
                   if (item.data && typeof item.data === "string" && item.data.startsWith(mesAnoFiltro)) {
+                    // Ignora baixas contábeis por novação/repactuação de dívida (sem entrada em dinheiro)
+                    if (item.acordo?.tipo === "REPACTUACAO_BAIXA" || (typeof item.detalhes === "string" && item.detalhes.includes("Acordo de Repactuação"))) {
+                      continue;
+                    }
                     const val = item.valor || 0;
+                    if (val <= 0) continue;
                     const key = `${row.id}_${item.data}_${val}`;
                     if (!pagamentosMap.has(key)) {
                       const dtPag = new Date(item.data.slice(0, 10) + "T00:00:00Z").getTime();

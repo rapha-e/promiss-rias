@@ -1418,7 +1418,8 @@ export default function RenegociacaoCobranca({
 
                       logsArray.push({
                         data: agoraIso,
-                        valor: p.saldo_devedor,
+                        valor: 0, // Baixa contábil por novação de dívida (sem entrada em dinheiro no caixa)
+                        saldoRepactuado: p.saldo_devedor,
                         operador: operadorEmail,
                         detalhes: detalhesLogAcordo,
                         acordo: {
