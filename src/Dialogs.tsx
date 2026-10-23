@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FormEvent, ReactNode } from "react";
+import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
@@ -11,10 +11,10 @@ import {
 import type { Row, CreditScoreInfo, CompraGrupo } from "./lib";
 import { SortIcon } from "./SortIcon";
 
-export function Painel({ onClose, wide, children }: { onClose: () => void; wide?: boolean; children: ReactNode }) {
+export function Painel({ onClose, wide, style, children }: { onClose: () => void; wide?: boolean; style?: CSSProperties; children: ReactNode }) {
   return (
     <div className="ov" onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className={`panel ${wide ? "wide" : ""}`}>{children}</div>
+      <div className={`panel ${wide ? "wide" : ""}`} style={style}>{children}</div>
     </div>
   );
 }
@@ -1271,23 +1271,59 @@ export function BaixaDialog({
       }
 
       const lista = (data || []) as Row[];
-      setOutras(lista);
 
-      // Prioriza selecionar promissórias do mesmo carnê (ex: "/8") com vencimento igual ou posterior
-      const m = row.parcelas?.match(/(\d+)\/(\d+)/);
-      if (m) {
-        const totalCarnê = parseInt(m[2], 10);
-        const doMesmoCarnê = lista.filter(r => r.parcelas?.includes(`/${totalCarnê}`));
+      // Identificar o carnê da parcela atual (formato X/Y)
+      const mAtual = (row.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+      const totalCarnêAtual = mAtual ? parseInt(mAtual[2], 10) : null;
+      const numParcelaAtual = mAtual ? parseInt(mAtual[1], 10) : 0;
+
+      let listaOrdenada = lista;
+
+      if (totalCarnêAtual) {
+        const doMesmoCarnê: Row[] = [];
+        const deOutrosCarnes: Row[] = [];
+
+        for (const r of lista) {
+          const m = (r.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+          if (m && parseInt(m[2], 10) === totalCarnêAtual) {
+            doMesmoCarnê.push(r);
+          } else {
+            deOutrosCarnes.push(r);
+          }
+        }
+
+        // Ordenar do mesmo carnê: primeiro as posteriores à parcela atual (ex: se pagando 1/6, vem 2/6, 3/6, 4/6...), ordenadas crescentemente
+        doMesmoCarnê.sort((a, b) => {
+          const na = parseInt((a.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+          const nb = parseInt((b.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+          const aPost = na > numParcelaAtual;
+          const bPost = nb > numParcelaAtual;
+          if (aPost !== bPost) return aPost ? -1 : 1;
+          return na - nb;
+        });
+
+        // Ordenar outros carnês por vencimento cronológico
+        deOutrosCarnes.sort((a, b) => {
+          const da = a.vencimento ? new Date(a.vencimento).getTime() : 0;
+          const db = b.vencimento ? new Date(b.vencimento).getTime() : 0;
+          return da - db;
+        });
+
+        listaOrdenada = [...doMesmoCarnê, ...deOutrosCarnes];
+
         if (doMesmoCarnê.length > 0) {
           setSelecionadas(new Set(doMesmoCarnê.map(r => r.id)));
           const somaTotal = row.divida_total + doMesmoCarnê.reduce((acc, r) => acc + r.divida_total, 0);
           setValorTotalCompra(somaTotal);
-          setTotalParcelasCarnê(totalCarnê);
-          return;
+          setTotalParcelasCarnê(totalCarnêAtual);
+        } else {
+          setSelecionadas(new Set(listaOrdenada.map(r => r.id)));
         }
+      } else {
+        setSelecionadas(new Set(lista.map(r => r.id)));
       }
-      // Se não identificar formato X/Y específico, seleciona todas as outras em aberto
-      setSelecionadas(new Set(lista.map(r => r.id)));
+
+      setOutras(listaOrdenada);
     }
 
     carregar();
@@ -1609,7 +1645,7 @@ export function BaixaDialog({
     const numero = nums[Math.min(selTel, nums.length - 1)];
 
     return (
-      <Painel onClose={() => { onClose(); onSaved(); }}>
+      <Painel onClose={() => { onClose(); onSaved(); }} style={{ width: "min(720px, 96vw)" }}>
         <div style={{ padding: 20, display: "grid", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
             <h2 style={{ margin: 0, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
@@ -1736,7 +1772,7 @@ export function BaixaDialog({
   }
 
   return (
-    <Painel onClose={onClose} wide={temRateio}>
+    <Painel onClose={onClose} style={{ width: "min(780px, 96vw)" }}>
       <form onSubmit={submit} autoComplete="off">
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0, color: "var(--ink)" }}>Dar Baixa / Pagamento</h2>
@@ -2005,31 +2041,31 @@ export function BaixaDialog({
                         background: "var(--card)",
                         border: "1px solid var(--line)",
                         borderRadius: 8,
-                        overflow: "hidden",
-                        maxHeight: 180,
+                        overflowX: "auto",
+                        maxHeight: 220,
                         overflowY: "auto",
                       }}
                     >
-                      <table style={{ width: "100%", fontSize: 12, borderCollapse: "collapse" }}>
+                      <table style={{ width: "100%", fontSize: 13, borderCollapse: "collapse", minWidth: 540 }}>
                         <thead>
                           <tr style={{ background: "var(--soft)", color: "var(--mut)", fontSize: 11 }}>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>PARCELA</th>
-                            <th style={{ textAlign: "left", padding: "6px 8px" }}>VENCIMENTO</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>SALDO ATUAL</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>VALOR ABATIDO</th>
-                            <th style={{ textAlign: "right", padding: "6px 8px" }}>NOVO SALDO</th>
+                            <th style={{ textAlign: "left", padding: "8px 10px" }}>PARCELA</th>
+                            <th style={{ textAlign: "left", padding: "8px 10px" }}>VENCIMENTO</th>
+                            <th style={{ textAlign: "right", padding: "8px 10px" }}>SALDO ATUAL</th>
+                            <th style={{ textAlign: "right", padding: "8px 10px" }}>VALOR ABATIDO</th>
+                            <th style={{ textAlign: "right", padding: "8px 10px" }}>NOVO SALDO</th>
                           </tr>
                         </thead>
                         <tbody>
                           {simulacaoAbateCascata.map(p => (
                             <tr key={p.id} style={{ borderTop: "1px solid var(--line)" }}>
-                              <td style={{ padding: "6px 8px", fontWeight: 600 }}>{p.parcelas || "—"}</td>
-                              <td style={{ padding: "6px 8px" }}>{dt(p.vencimento)}</td>
-                              <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">{money(p.saldo_devedor)}</td>
-                              <td style={{ padding: "6px 8px", textAlign: "right", color: p.valorAbatido > 0 ? "#15803d" : "var(--mut)", fontWeight: p.valorAbatido > 0 ? 700 : 400 }} className="mono">
+                              <td style={{ padding: "8px 10px", fontWeight: 600 }}>{p.parcelas || "—"}</td>
+                              <td style={{ padding: "8px 10px" }}>{dt(p.vencimento)}</td>
+                              <td style={{ padding: "8px 10px", textAlign: "right" }} className="mono">{money(p.saldo_devedor)}</td>
+                              <td style={{ padding: "8px 10px", textAlign: "right", color: p.valorAbatido > 0 ? "#15803d" : "var(--mut)", fontWeight: p.valorAbatido > 0 ? 700 : 400 }} className="mono">
                                 {p.valorAbatido > 0 ? `- ${money(p.valorAbatido)}` : "—"}
                               </td>
-                              <td style={{ padding: "6px 8px", textAlign: "right" }} className="mono">
+                              <td style={{ padding: "8px 10px", textAlign: "right" }} className="mono">
                                 {p.quitada ? (
                                   <span className="pill" style={{ background: "#15803d15", color: "#15803d", borderColor: "#15803d", fontSize: 11 }}>
                                     ✓ Quitada
