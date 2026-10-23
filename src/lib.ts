@@ -12,10 +12,16 @@ export const money = (c: number) => fmt.format(c / 100);
 export const toBRL = (c: number) => (c / 100).toFixed(2).replace(".", ",");
 
 /** Formata texto numérico ou centavos com máscara monetária brasileira (ex.: "R$ 1.500,00") */
-export function formatarMascaraMoeda(valorOuTexto: number | string): string {
+export function formatarMascaraMoeda(valorOuTexto: number | string, permitirVazio: boolean = false): string {
+  if (valorOuTexto === "" || valorOuTexto === null || valorOuTexto === undefined) {
+    if (permitirVazio) return "";
+  }
   const digits = typeof valorOuTexto === "number"
     ? Math.round(valorOuTexto).toString()
-    : valorOuTexto.replace(/\D/g, "");
+    : String(valorOuTexto).replace(/\D/g, "");
+  if (!digits) {
+    return permitirVazio ? "" : fmt.format(0);
+  }
   const centavos = parseInt(digits, 10) || 0;
   return fmt.format(centavos / 100);
 }
@@ -96,8 +102,13 @@ export function mascaraTelefone(v: string): string {
 }
 
 export function parse(v: string) {
+  if (typeof v !== "string") return 0;
   v = v.trim();
   if (!v) return 0;
+  if (/R\$/i.test(v)) {
+    const digits = v.replace(/\D/g, "");
+    return digits ? parseInt(digits, 10) : 0;
+  }
   if (v.includes(",")) v = v.replace(/\./g, "").replace(",", ".");
   const n = Number(v);
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : NaN;
@@ -511,37 +522,64 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
       // Regra de ouro: o carnê NÃO pode já conter o mesmo número de parcela (duas 1/10 ou duas 10/10 não pertencem ao mesmo carnê)
       if (c.nums.has(num)) continue;
 
-      // 1) Mesma origem explícita (ex: "DESMEMBRADO DO ID #123" ou "COMPRA #...")
+      const diffValor = Math.abs(row.divida_total - c.valorParcela);
+      const valorCompativel = diffValor <= Math.max(denom, 200);
+      if (!valorCompativel) continue;
+
+      // 1) Mesma origem explícita OU desmembrado de um dos IDs deste carnê
+      const idDesmembradoMatch = origemNorm.match(/DESMEMBRADO DO ID #(\d+)/i);
+      const idOrigemDesmembrado = idDesmembradoMatch ? parseInt(idDesmembradoMatch[1], 10) : null;
+      const ehFilhaDoCarne = idOrigemDesmembrado && c.rows.some(r => r.id === idOrigemDesmembrado);
+
+      if (ehFilhaDoCarne) {
+        melhorCarne = c;
+        break;
+      }
+
       if (origemNorm && c.origem && origemNorm === c.origem && origemNorm !== "SISTEMA WEB" && origemNorm !== "PROMISSÓRIAS LOJA") {
         melhorCarne = c;
         break;
       }
 
-      // 2) Mesmo lote de inserção no sistema (diferença <= 5 minutos) E valor de parcela compatível
+      // 2) Mesmo lote de inserção no sistema (diferença <= 5 minutos)
       const timeDiff = Math.abs(itemTime - c.createdAt);
       const mesmoLote = itemTime > 0 && c.createdAt > 0 && timeDiff <= 5 * 60 * 1000;
-      const diffValor = Math.abs(row.divida_total - c.valorParcela);
-      const valorCompativel = diffValor <= Math.max(denom, 200);
-
-      // Compatibilidade de dia do mês do vencimento (mesmo dia com tolerância para fins de semana)
-      const diaCompativel = diaVenc != null && c.diaVenc != null
-        ? Math.abs(diaVenc - c.diaVenc) <= 4 || Math.abs(diaVenc - c.diaVenc) >= 27
-        : true;
-
-      if (mesmoLote && valorCompativel) {
+      if (mesmoLote) {
         melhorCarne = c;
         break;
       }
 
-      if (valorCompativel && diaCompativel) {
+      // 3) Compatibilidade de dia do mês do vencimento (mesmo dia com tolerância para fins de semana)
+      const diaCompativel = diaVenc != null && c.diaVenc != null
+        ? Math.abs(diaVenc - c.diaVenc) <= 4 || Math.abs(diaVenc - c.diaVenc) >= 27
+        : true;
+
+      if (diaCompativel) {
         melhorCarne = c;
         break;
+      }
+
+      // 4) Regra de integridade de carnê (preenchimento de lacunas de parcelas):
+      // Se as parcelas possuem mesmo denominador, valor compatível e seus vencimentos situam-se
+      // dentro do horizonte cronológico esperado do carnê, pertencem à mesma compra (ex.: quando
+      // um vencimento foi prorrogado ou alterado a pedido do cliente/operador).
+      const vencItem = row.vencimento ? new Date(row.vencimento).getTime() : 0;
+      const vencsGrupo = c.rows.map(r => r.vencimento ? new Date(r.vencimento).getTime() : 0).filter(t => t > 0);
+      if (vencItem > 0 && vencsGrupo.length > 0) {
+        const minVenc = Math.min(...vencsGrupo);
+        const maxVenc = Math.max(...vencsGrupo);
+        const estaNaJanela = (vencItem >= minVenc - 45 * 86400000) && (vencItem <= maxVenc + 45 * 86400000);
+        if (estaNaJanela) {
+          melhorCarne = c;
+          break;
+        }
       }
     }
 
     if (melhorCarne) {
       melhorCarne.nums.add(num);
       melhorCarne.rows.push(row);
+      if (!melhorCarne.origem && origemNorm) melhorCarne.origem = origemNorm;
     } else {
       carnesGrupos.push({
         denom,

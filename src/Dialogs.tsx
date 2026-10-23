@@ -7,6 +7,7 @@ import {
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses,
   identificarCompraAtual, separarComprasCliente,
+  formatarMascaraMoeda, desmascararMoeda,
 } from "./lib";
 import type { Row, CreditScoreInfo, CompraGrupo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -45,14 +46,26 @@ export function VencCell({ r }: { r: Row }) {
 export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: () => void; onSaved: () => void }) {
   const [n, setN] = useState(row?.cliente_nome ?? "");
   const [p, setP] = useState(row ? mascaraTelefone(row.telefone) : "");
-  const [t, setT] = useState(row ? toBRL(row.divida_total) : "");
-  const [g, setG] = useState(row ? toBRL(row.valor_pago) : "");
+  const [t, setT] = useState(row ? formatarMascaraMoeda(row.divida_total) : "");
+  const [g, setG] = useState(row && row.valor_pago > 0 ? formatarMascaraMoeda(row.valor_pago) : "");
   const [qtd, setQtd] = useState(1);
   const [i, setI] = useState(row?.parcelas ?? "1X");
   const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
+  const [atualizarProximas, setAtualizarProximas] = useState(false);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
+
+  // Informações sobre parcelamento de carnê (ex: 2/6, 3/10) para suporte a replicação de data-base
+  const infoCarne = useMemo(() => {
+    if (!row || !row.parcelas) return null;
+    const m = (row.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+    if (!m) return null;
+    const num = parseInt(m[1], 10);
+    const denom = parseInt(m[2], 10);
+    if (num >= denom) return null; // Já é a última parcela do carnê
+    return { num, denom, totalFuturas: denom - num };
+  }, [row]);
 
   // Estados do Auto Preenchimento Inteligente ao digitar (Autocomplete)
   const [sugestoes, setSugestoes] = useState<{
@@ -318,8 +331,66 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         vencimento: d || null,
       };
       const { error } = await supabase.from("promissorias").update(payload).eq("id", row.id);
+      if (error) {
+        setBusy(false);
+        return setErr("Não foi possível salvar: " + error.message);
+      }
+
+      // Repercutir nova data-base nas próximas parcelas do carnê se solicitado
+      if (atualizarProximas && infoCarne && d) {
+        try {
+          const { data: todasDoCliente } = await supabase
+            .from("promissorias")
+            .select("id, parcelas, vencimento, saldo_devedor, divida_total, origem")
+            .ilike("cliente_nome", n.trim());
+
+          if (todasDoCliente && todasDoCliente.length > 0) {
+            for (const pRow of todasDoCliente) {
+              if (pRow.id === row.id) continue;
+              const mP = (pRow.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+              if (!mP) continue;
+              const numP = parseInt(mP[1], 10);
+              const denomP = parseInt(mP[2], 10);
+
+              // Pertence ao mesmo carnê (mesmo denominador) e é uma parcela posterior
+              if (denomP === infoCarne.denom && numP > infoCarne.num) {
+                const diffValor = Math.abs(pRow.divida_total - T);
+                if (diffValor <= Math.max(denomP, 200)) {
+                  const offsetMeses = numP - infoCarne.num;
+                  const novoVenc = somaMeses(d, offsetMeses);
+
+                  if (novoVenc && novoVenc !== pRow.vencimento) {
+                    let logsArray: any[] = [];
+                    if (pRow.origem) {
+                      try {
+                        const parsed = JSON.parse(pRow.origem);
+                        if (Array.isArray(parsed)) logsArray = parsed;
+                      } catch (_) {}
+                    }
+                    logsArray.push({
+                      data: new Date().toISOString(),
+                      operador: "alinhamento_automatico_carne",
+                      detalhes: `Vencimento alinhado com a parcela ${row.parcelas}: ajustado de ${pRow.vencimento} para ${novoVenc} (todo dia ${d.slice(8, 10)}).`,
+                    });
+
+                    await supabase
+                      .from("promissorias")
+                      .update({
+                        vencimento: novoVenc,
+                        origem: JSON.stringify(logsArray),
+                      })
+                      .eq("id", pRow.id);
+                  }
+                }
+              }
+            }
+          }
+        } catch (e: any) {
+          console.warn("Aviso ao repercutir vencimento nas próximas parcelas:", e);
+        }
+      }
+
       setBusy(false);
-      if (error) return setErr("Não foi possível salvar: " + error.message);
     } else {
       // Criação de novas promissórias com divisão automática como uma nova compra independente
       const loteId = `COMPRA_${Date.now()}`;
@@ -595,9 +666,9 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 <input
                   ref={inputValorRef}
                   value={t}
-                  onChange={e => setT(e.target.value)}
-                  inputMode="decimal"
-                  placeholder="0,00"
+                  onChange={e => setT(formatarMascaraMoeda(e.target.value, true))}
+                  inputMode="numeric"
+                  placeholder="R$ 0,00"
                   required
                 />
               </label>
@@ -626,7 +697,12 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               </label>
               <label>
                 Valor já pago / Entrada (R$)
-                <input value={g} onChange={e => setG(e.target.value)} inputMode="decimal" placeholder="0,00" />
+                <input
+                  value={g}
+                  onChange={e => setG(formatarMascaraMoeda(e.target.value, true))}
+                  inputMode="numeric"
+                  placeholder="R$ 0,00"
+                />
               </label>
             </div>
 
@@ -693,8 +769,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         ) : (
           <>
             <div className="r2">
-              <label>Dívida (R$)<input value={t} onChange={e => setT(e.target.value)} inputMode="decimal" placeholder="0,00" required /></label>
-              <label>Valor pago (R$)<input value={g} onChange={e => setG(e.target.value)} inputMode="decimal" placeholder="0,00" /></label>
+              <label>Dívida (R$)<input value={t} onChange={e => setT(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" required /></label>
+              <label>Valor pago (R$)<input value={g} onChange={e => setG(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" /></label>
             </div>
             <div className="r2">
               <label>Parcelas<input value={i} onChange={e => setI(e.target.value)} maxLength={40} placeholder="ex.: 1/3" /></label>
@@ -704,6 +780,62 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               <span>Saldo <b className="mono">{ok ? money(Math.max(T - G, 0)) : "—"}</b></span>
               {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
             </div>
+
+            {infoCarne && d && (
+              <div
+                style={{
+                  marginTop: 10,
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: atualizarProximas ? "rgba(15, 118, 110, 0.08)" : "var(--soft)",
+                  border: atualizarProximas ? "1px solid var(--brand)" : "1px solid var(--line)",
+                  transition: "all .15s ease",
+                }}
+              >
+                <label style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", margin: 0 }}>
+                  <input
+                    type="checkbox"
+                    checked={atualizarProximas}
+                    onChange={e => setAtualizarProximas(e.target.checked)}
+                    style={{ marginTop: 2, accentColor: "var(--brand)", width: 17, height: 17 }}
+                  />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>
+                      🗓️ Repercutir nova data-base (todo dia {d.slice(8, 10)}) nas próximas parcelas deste carnê
+                    </div>
+                    <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }}>
+                      Alinha automaticamente os vencimentos das parcelas seguintes em aberto ({infoCarne.num + 1}/{infoCarne.denom} até {infoCarne.denom}/{infoCarne.denom}) para vencerem no mesmo dia nos meses seguintes.
+                    </div>
+                  </div>
+                </label>
+
+                {atualizarProximas && (
+                  <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed var(--line)", fontSize: 11.5 }}>
+                    <span style={{ fontWeight: 600, color: "var(--brand)" }}>Prévia dos novos vencimentos:</span>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
+                      {Array.from({ length: Math.min(infoCarne.totalFuturas, 8) }, (_, k) => {
+                        const numProx = infoCarne.num + k + 1;
+                        const vencProx = somaMeses(d, k + 1);
+                        return (
+                          <span
+                            key={numProx}
+                            className="pill"
+                            style={{ fontSize: 11, background: "var(--card)", borderColor: "var(--line)" }}
+                          >
+                            <b>{numProx}/{infoCarne.denom}</b>: {dt(vencProx)}
+                          </span>
+                        );
+                      })}
+                      {infoCarne.totalFuturas > 8 && (
+                        <span className="sub" style={{ alignSelf: "center" }}>
+                          +{infoCarne.totalFuturas - 8} parcelas...
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
@@ -1208,7 +1340,7 @@ export function BaixaDialog({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [valorStr, setValorStr] = useState(toBRL(row.saldo_devedor));
+  const [valorStr, setValorStr] = useState(formatarMascaraMoeda(row.saldo_devedor));
   const [parcelaIdentificador, setParcelaIdentificador] = useState<string>(() => {
     let logsCount = 0;
     try {
@@ -1786,9 +1918,9 @@ export function BaixaDialog({
             </span>
             <input
               value={valorStr}
-              onChange={e => setValorStr(e.target.value)}
-              inputMode="decimal"
-              placeholder="0,00"
+              onChange={e => setValorStr(formatarMascaraMoeda(e.target.value, true))}
+              inputMode="numeric"
+              placeholder="R$ 0,00"
               style={{ fontSize: 17, fontWeight: 600, padding: "8px 12px" }}
               autoFocus
               required

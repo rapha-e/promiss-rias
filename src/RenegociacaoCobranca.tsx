@@ -1,6 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento, PIX_CHAVE_OFICIAL } from "./lib";
+import {
+  dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL,
+  gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento, PIX_CHAVE_OFICIAL,
+  formatarMascaraMoeda, desmascararMoeda,
+} from "./lib";
 import type { Row } from "./lib";
 import { FichaCliente } from "./Dialogs";
 
@@ -74,7 +78,7 @@ export default function RenegociacaoCobranca({
   const [tipoScript, setTipoScript] = useState<TipoScript>("binaria");
   const [descontoPercentual, setDescontoPercentual] = useState<number>(20);
   const [entradaValor, setEntradaValor] = useState<number>(0);
-  const [entradaTexto, setEntradaTexto] = useState<string>("0,00");
+  const [entradaTexto, setEntradaTexto] = useState<string>("R$ 0,00");
   const [parcelasQtd, setParcelasQtd] = useState<number>(5);
   const [diaPagamentoEntrada, setDiaPagamentoEntrada] = useState<string>("hoje");
   const [diaVencimentoParcelas, setDiaVencimentoParcelas] = useState<string>("dia 10 do próximo mês");
@@ -901,7 +905,7 @@ export default function RenegociacaoCobranca({
                           style={{ flex: "1 1 auto", padding: "4px 6px", fontSize: 11 }}
                           onClick={() => {
                             setEntradaValor(item.valor);
-                            setEntradaTexto(toBRL(item.valor));
+                            setEntradaTexto(formatarMascaraMoeda(item.valor));
                           }}
                         >
                           {item.label}
@@ -915,16 +919,15 @@ export default function RenegociacaoCobranca({
                         Entrada livre (R$):
                         <input
                           type="text"
-                          placeholder="0,00"
+                          placeholder="R$ 0,00"
                           value={entradaTexto}
                           onChange={e => {
-                            setEntradaTexto(e.target.value);
-                            const parsed = parse(e.target.value);
-                            if (!isNaN(parsed) && parsed >= 0) {
-                              setEntradaValor(parsed);
-                            }
+                            const formatado = formatarMascaraMoeda(e.target.value, true);
+                            setEntradaTexto(formatado);
+                            setEntradaValor(desmascararMoeda(formatado));
                           }}
-                          style={{ width: 85, padding: "3px 6px", fontSize: 11, textAlign: "right" }}
+                          inputMode="numeric"
+                          style={{ width: 105, padding: "3px 6px", fontSize: 11, textAlign: "right", fontWeight: 600 }}
                         />
                       </label>
 
@@ -1071,7 +1074,7 @@ export default function RenegociacaoCobranca({
                 type="button"
                 className="btn ghost"
                 onClick={() => {
-                  setPromessaValor(String(simulacao.saldoTotal));
+                  setPromessaValor(formatarMascaraMoeda(simulacao.saldoTotal));
                   setModalPromessa(true);
                 }}
                 style={{ padding: "12px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}
@@ -1133,11 +1136,11 @@ export default function RenegociacaoCobranca({
               <label>
                 Valor prometido (R$):
                 <input
-                  type="number"
-                  step="0.01"
+                  type="text"
                   value={promessaValor}
-                  onChange={e => setPromessaValor(e.target.value)}
-                  placeholder={String(clienteAtual.valorTotal)}
+                  onChange={e => setPromessaValor(formatarMascaraMoeda(e.target.value, true))}
+                  inputMode="numeric"
+                  placeholder={formatarMascaraMoeda(clienteAtual.valorTotal)}
                 />
               </label>
               <label>
@@ -1158,7 +1161,7 @@ export default function RenegociacaoCobranca({
                       cliente: clienteAtual.cliente,
                       telefone: clienteAtual.telefoneOriginal,
                       dataPromessa: promessaData,
-                      valor: Number(promessaValor) || clienteAtual.valorTotal,
+                      valor: desmascararMoeda(promessaValor) || clienteAtual.valorTotal,
                       observacao: promessaObs,
                     });
                     alert(`📅 Promessa de pagamento registrada para ${dt(promessaData)}! Ela aparecerá no Dashboard na data marcada.`);
@@ -1286,15 +1289,14 @@ export default function RenegociacaoCobranca({
                   <input
                     type="text"
                     value={entradaTexto}
-                    placeholder="0,00"
+                    placeholder="R$ 0,00"
                     onChange={e => {
-                      setEntradaTexto(e.target.value);
-                      const parsed = parse(e.target.value);
-                      if (!isNaN(parsed) && parsed >= 0) {
-                        setEntradaValor(parsed);
-                      }
+                      const formatado = formatarMascaraMoeda(e.target.value, true);
+                      setEntradaTexto(formatado);
+                      setEntradaValor(desmascararMoeda(formatado));
                     }}
-                    style={{ width: "100%", padding: "6px 10px", fontSize: 13, marginTop: 4, borderRadius: 8 }}
+                    inputMode="numeric"
+                    style={{ width: "100%", padding: "6px 10px", fontSize: 13, marginTop: 4, borderRadius: 8, fontWeight: 600 }}
                   />
                 </label>
 
