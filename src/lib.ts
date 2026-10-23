@@ -237,17 +237,31 @@ export const linkWhatsApp = (numero: string, msg: string) => `https://wa.me/${nu
 
 export const titulo = (s: string) => s.toLocaleLowerCase("pt-BR").replace(/(^|\s)\S/g, c => c.toLocaleUpperCase("pt-BR"));
 
-export function mensagemCobranca(nome: string, itens: Item[]): string {
+export const PIX_CHAVE_OFICIAL = "00020126400014BR.GOV.BCB.PIX011815.269.478/0001-995204000053039865802BR5910Leo Oticas6008Brasilia62130509LeoOticas63049F88";
+
+export function mensagemCobranca(nome: string, itens: Item[], chavePixCustom?: string): string {
   const abertos = itens.filter(i => i.valor > 0).sort((a, b) => (a.vencimento ?? "").localeCompare(b.vencimento ?? ""));
   const total = abertos.reduce((s, i) => s + i.valor, 0);
-  const primeiro = titulo(nome.trim().split(/\s+/)[0] || "cliente");
+  const primeiro = titulo(nome.trim().split(/\s+/)[0] || "Cliente");
   const linhas = abertos.slice(0, 8).map(i => {
     const a = i.vencimento ? diffDias(hoje(), i.vencimento) : 0;
-    const sit = !i.vencimento ? "" : a > 0 ? ` (vencida há ${a} ${a === 1 ? "dia" : "dias"})` : a === 0 ? " (vence hoje)" : "";
-    return `• ${money(i.valor)}${i.vencimento ? " — venc. " + dt(i.vencimento) : ""}${sit}`;
+    const sit = !i.vencimento ? "" : a > 0 ? ` (vencida há ${a} ${a === 1 ? "dia" : "dias"})` : a === 0 ? " (vence hoje!)" : ` (vence em ${-a} dias)`;
+    return `• Parcela: ${money(i.valor)}${i.vencimento ? " — venc. " + dt(i.vencimento) : ""}${sit}`;
   });
   if (abertos.length > 8) linhas.push(`• e mais ${abertos.length - 8} promissória(s)`);
-  return `Olá, ${primeiro}! Tudo bem?\n\nPassando para lembrar que consta em aberto ${abertos.length > 1 ? "os seguintes valores" : "o seguinte valor"}:\n${linhas.join("\n")}\n\nTotal: ${money(total)}\n\nSe já realizou o pagamento, por favor desconsidere esta mensagem. Qualquer dúvida, estou à disposição!`;
+
+  const chavePix = (chavePixCustom || PIX_CHAVE_OFICIAL).trim();
+
+  return (
+    `Olá, ${primeiro}! Tudo bem? Esperamos que esteja tendo um excelente dia! 👓✨\n\n` +
+    `Passando com todo carinho para um lembrete amigo referente à sua compra na *LeoÓticas*:\n\n` +
+    `${linhas.join("\n")}\n\n` +
+    `*Total em aberto:* ${money(total)}\n\n` +
+    `Para facilitar e você resolver direto do celular em menos de 1 minuto, basta escanear o QR Code acima ou usar o código Pix Copia e Cola abaixo:\n\n` +
+    `📋 *Pix Copia e Cola:*\n\`${chavePix}\`\n\n` +
+    `Sabemos que a rotina é corrida e às vezes imprevistos acontecem — se já efetuou o pagamento, por favor desconsidere este aviso com tranquilidade!\n\n` +
+    `Qualquer dúvida ou se precisar de auxílio, é só dar um alô aqui. Um abraço da nossa equipe! 🙏😊`
+  );
 }
 
 export function formatarValorSemCifrao(c: number): string {

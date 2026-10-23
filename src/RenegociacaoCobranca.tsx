@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento } from "./lib";
+import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL, gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento, PIX_CHAVE_OFICIAL } from "./lib";
 import type { Row } from "./lib";
 import { FichaCliente } from "./Dialogs";
 
@@ -57,9 +57,11 @@ export default function RenegociacaoCobranca({
   const [ddd, setDddLocal] = useState(getDDD());
   const [chavePix, setChavePix] = useState(() => {
     try {
-      return localStorage.getItem(PIX_KEY) || "";
+      const salvalocal = localStorage.getItem(PIX_KEY);
+      if (salvalocal && salvalocal.trim()) return salvalocal;
+      return PIX_CHAVE_OFICIAL;
     } catch {
-      return "";
+      return PIX_CHAVE_OFICIAL;
     }
   });
 
@@ -286,70 +288,66 @@ export default function RenegociacaoCobranca({
   const gerarMensagem = (item: ClienteFila): string => {
     const primeiroNome = titulo(item.cliente.trim().split(/\s+/)[0] || "Cliente");
     const saldoTotal = item.valorTotal;
-    const chavePixTxt = chavePix.trim() ? `\n🔑 *Chave PIX:* \`${chavePix.trim()}\`` : "";
+    const chaveAtual = (chavePix.trim() || PIX_CHAVE_OFICIAL).trim();
 
-    // Gera o código PIX Copia e Cola com o valor com desconto
-    const pixCopiaColaVista = chavePix.trim()
-      ? `\n📋 *PIX Copia e Cola (valor de ${money(simulacao.valorComDesconto)} já preenchido):*\n\`${gerarPayloadPix({
-          chave: chavePix.trim(),
-          valor: simulacao.valorComDesconto,
-          txid: `RENEG${item.promissorias[0]?.id || "1"}`,
-        })}\``
-      : "";
-
-    // 1. SCRIPT DE OPÇÃO BINÁRIA (TÉCNICA DE ALTA CONVERSÃO)
+    // 1. SCRIPT DE OPÇÃO BINÁRIA (D+31 a D+60 - TÉCNICA DE ALTA CONVERSÃO)
     if (tipoScript === "binaria") {
       const textoOpcao2 = simulacao.entradaReal > 0
-        ? `👉 *OPÇÃO 2 (Entrada + Parcelamento):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para ${diaVencimentoParcelas}.\n\n`
-        : `👉 *OPÇÃO 2 (Parcelamento Facilitado):* Dividimos todo o seu saldo em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* sem entrada, com 1º vencimento para ${diaVencimentoParcelas}.\n\n`;
+        ? `👉 *OPÇÃO 2 (Entrada Facilitada + Parcelamento Suave):* Dê uma pequena entrada de *${money(simulacao.entradaReal)}* hoje para travar o acordo e dividimos todo o restante em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* para o dia ${diaVencimentoParcelas}, sem juros adicionais.\n\n`
+        : `👉 *OPÇÃO 2 (Parcelamento Facilitado sem Entrada):* Dividimos todo o seu saldo em *${parcelasQtd}x de ${money(simulacao.valorParcela)}* sem entrada, com o 1º vencimento apenas para o dia ${diaVencimentoParcelas}.\n\n`;
 
       return (
-        `Olá, ${primeiroNome}! Tudo bem? Aqui é da equipe da *LeoÓticas*.\n\n` +
-        `Estou entrando em contato referente à sua pendência conosco no valor total de *${money(saldoTotal)}*.\n\n` +
-        `Sabemos que imprevistos acontecem e queremos muito te ajudar a regularizar sua situação hoje com tranquilidade. Preparamos duas opções facilitadas:\n\n` +
-        `👉 *OPÇÃO 1 (Quitação com Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via PIX (desconto de ${money(simulacao.valorDesconto)}) e quitamos seu saldo hoje mesmo!${chavePixTxt}${pixCopiaColaVista}\n\n` +
+        `Olá, ${primeiroNome}! Tudo bem? Espero de coração que sim! 👓✨\n\n` +
+        `Aqui é da equipe da *LeoÓticas*. Estou entrando em contato diretamente com você porque valorizamos muito a confiança e a amizade que construímos desde a sua compra.\n\n` +
+        `Sabemos que imprevistos e momentos apertados acontecem na vida de todo mundo — ninguém deixa de acertar uma promissória porque quer. Nosso objetivo não é te cobrar, mas sim te ajudar a ficar com a mente leve e seu cadastro 100% honrado conosco. Consta em aberto o valor de *${money(saldoTotal)}*.\n\n` +
+        `Para facilitar de verdade e caber com conforto no seu momento, preparamos duas soluções especiais:\n\n` +
+        `👉 *OPÇÃO 1 (Quitação Imediata com Super Desconto):* Pague apenas *${money(simulacao.valorComDesconto)}* à vista via Pix (desconto direto de ${money(simulacao.valorDesconto)}) e damos baixa total e definitiva na sua pendência hoje mesmo!\n\n` +
         textoOpcao2 +
-        `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Podemos fechar?`
+        `Para sua facilidade, você pode escanear o QR Code acima ou copiar o código Pix oficial abaixo:\n\n` +
+        `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+        `Qual dessas duas opções fica mais confortável para o seu orçamento hoje? Me dá uma resposta aqui que já formalizo tudo para você! 🤝🙏`
       );
     }
 
-    // 2. SCRIPT DE RESGATE COM DESCONTO À VISTA (D+61+ e FUNDO PERDIDO)
+    // 2. SCRIPT DE RESGATE COM DESCONTO À VISTA (D+61+ e FUNDO PERDIDO / RECUPERAÇÃO CRÍTICA)
     if (tipoScript === "desconto_vista") {
       return (
-        `Olá, ${primeiroNome}! Oportunidade exclusiva de quitação na *LeoÓticas*!\n\n` +
-        `Estamos fechando o balanço de cobranças e a gerência autorizou uma condição especial única para o seu saldo em aberto de *${money(saldoTotal)}*:\n\n` +
-        `🎯 *Quitação total por apenas ${money(simulacao.valorComDesconto)} via PIX!* (Você economiza ${money(simulacao.valorDesconto)} com ${descontoPercentual}% de desconto).\n\n` +
-        `Com isso, damos baixa total nas promissórias e seu cadastro fica 100% regularizado conosco.${chavePixTxt}${pixCopiaColaVista}\n\n` +
-        `Essa condição é especial para regularização hoje. Posso emitir o recibo de quitação para você?`
+        `Olá, ${primeiroNome}! Tudo bem? Espero que sim! 👓\n\n` +
+        `Aqui é da diretoria da *LeoÓticas*. Estou te mandando esta mensagem de forma muito transparente, pessoal e exclusiva.\n\n` +
+        `Estamos realizando hoje o fechamento do nosso balanço semestral de contas e fui pessoalmente autorizado a entrar em contato com os nossos clientes com pendências mais antigas para oferecermos uma saída honrosa e definitiva para o seu saldo em aberto de *${money(saldoTotal)}*.\n\n` +
+        `Sabemos que os últimos tempos foram desafiadores e não queremos de forma alguma que essa pendência continue gerando desgaste, bloqueios ou tirando a sua paz. Por isso, a diretoria liberou uma *CONDIÇÃO EXTRAORDINÁRIA DE BAIXA TOTAL*:\n\n` +
+        `🎯 *Quitação definitiva por apenas ${money(simulacao.valorComDesconto)} via Pix!* (Você economiza ${money(simulacao.valorDesconto)} com ${descontoPercentual}% de desconto concedido).\n\n` +
+        `Com esse valor, damos baixa 100% nas promissórias, cancelamos qualquer pendência no seu nome e reabilitamos o seu crédito para você voltar a comprar de portas abertas quando quiser.\n\n` +
+        `Basta escanear o QR Code oficial acima ou usar o código Pix Copia e Cola abaixo:\n\n` +
+        `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+        `${primeiroNome}, essa condição foi autorizada exclusivamente para o fechamento de hoje. Queremos muito te ajudar a virar essa página e dormir com a certeza de que está tudo 100% honrado.\n\n` +
+        `Posso emitir o seu comprovante e termo de quitação agora? Me responde aqui, por favor! 🙏🌟`
       );
     }
 
     // 3. SCRIPT DE CONTATO ATIVO & ESCUTA (D+6 a D+30)
     if (tipoScript === "contato_ativo") {
       return (
-        `Oi, ${primeiroNome}! Tudo bem? Aqui é da *LeoÓticas*.\n\n` +
-        `Notei aqui no sistema que a sua parcela no valor de *${money(saldoTotal)}* acabou vencendo há alguns dias e ainda não acusou baixa.\n\n` +
-        `Aconteceu algum imprevisto? Valorizamos muito você como cliente da nossa loja e queremos encontrar um caminho para te ajudar a manter tudo em dia sem pesar no bolso.\n\n` +
-        `Consegue me responder por aqui para combinarmos uma data boa para você? Aguardo seu retorno! 🙏`
+        `Oi, ${primeiroNome}! Tudo bem? Aqui é da equipe da *LeoÓticas*. 🙏👓\n\n` +
+        `Notei aqui no sistema que a sua parcela no valor de *${money(saldoTotal)}* acabou vencendo há alguns dias e ainda não acusou a baixa.\n\n` +
+        `Aconteceu algum imprevisto? A gente sabe muito bem que a correria do dia a dia é pesada e imprevistos acontecem com todo mundo. Você é um cliente super especial para a nossa loja e nós valorizamos demais a sua preferência.\n\n` +
+        `Queremos muito encontrar um caminho amigável para te ajudar a manter tudo em dia sem apertar o seu orçamento.\n\n` +
+        `Se já quiser deixar resolvido agora pelo celular com total rapidez, basta usar o QR Code acima ou o Pix Copia e Cola abaixo:\n\n` +
+        `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+        `Caso precise combinar uma data melhor ou dividir, me responde por aqui com sinceridade? Estou aqui de braços abertos para te ajudar! Um abraço carinhoso! 🤝✨`
       );
     }
 
-    // 4. SCRIPT DE LEMBRETE CORTÊS (D-3 a D+5)
+    // 4. SCRIPT DE LEMBRETE AMIGÁVEL & CORTÊS (D-3 a D+5)
     if (tipoScript === "lembrete_cortes") {
       const vencStr = item.vencimentoMaisUrgente ? `vencida em ${dt(item.vencimentoMaisUrgente)}` : "em aberto";
-      const pixLembrete = chavePix.trim()
-        ? `\n📋 *PIX Copia e Cola (valor de ${money(saldoTotal)}):*\n\`${gerarPayloadPix({
-            chave: chavePix.trim(),
-            valor: saldoTotal,
-            txid: `VENC${item.promissorias[0]?.id || "1"}`,
-          })}\``
-        : "";
       return (
-        `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim!\n\n` +
-        `Passando apenas para um lembrete cortês da sua promissória na *LeoÓticas* no valor de *${money(saldoTotal)}* (${vencStr}).\n\n` +
-        `Caso já tenha efetuado o pagamento, por favor desconsidere este aviso.\n` +
-        `Se precisar da chave PIX para quitar direto pelo celular com facilidade:${chavePixTxt}${pixLembrete}\n\n` +
-        `Se precisar de auxílio ou da 2ª via, é só responder aqui. Um abraço da equipe LeoÓticas! 👓`
+        `Olá, ${primeiroNome}! Tudo bem? Esperamos que você esteja tendo um excelente dia! 👓✨\n\n` +
+        `Passando apenas para um lembrete amigo referente à sua promissória na *LeoÓticas* no valor de *${money(saldoTotal)}* (${vencStr}).\n\n` +
+        `Sabemos que a rotina é corrida e a gente acaba deixando passar sem perceber — se já efetuou o pagamento, pode desconsiderar este aviso com total tranquilidade! 👍\n\n` +
+        `Para facilitar e você resolver direto do celular em menos de 1 minuto, basta escanear o QR Code acima ou usar o código Pix Copia e Cola abaixo:\n\n` +
+        `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+        `Qualquer dúvida ou se precisar de auxílio, é só dar um alô aqui. Um abraço carinhoso da nossa equipe! 🙏😊`
       );
     }
 
@@ -369,12 +367,13 @@ export default function RenegociacaoCobranca({
     }
 
     return (
-      `Olá, ${primeiroNome}! Tudo bem?\n\n` +
-      `Passando para lembrar referente à sua compra na *LeoÓticas*:\n\n` +
+      `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim! 👓\n\n` +
+      `Passando para alinhar referente à sua compra na *LeoÓticas*:\n\n` +
       `${linhas.join("\n")}\n\n` +
-      `*Total em aberto:* ${money(item.valorTotal)}\n` +
-      `${chavePixTxt}\n\n` +
-      `Caso já tenha efetuado o pagamento, por favor desconsidere. Se precisar de ajuda, é só nos responder aqui!`
+      `*Total em aberto:* ${money(item.valorTotal)}\n\n` +
+      `Para sua comodidade, você pode pagar direto pelo código Pix Copia e Cola abaixo ou escanear o QR Code oficial anexado:\n\n` +
+      `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+      `Caso já tenha efetuado o pagamento, por favor desconsidere este aviso. Se precisar de ajuda ou negociação de data, estamos à sua disposição por aqui! 🙏😊`
     );
   };
 
@@ -950,6 +949,65 @@ export default function RenegociacaoCobranca({
                 )}
               </div>
             )}
+
+            {/* CARD QR CODE PIX OFICIAL */}
+            <div
+              style={{
+                background: "linear-gradient(135deg, rgba(37, 211, 102, 0.08) 0%, rgba(30, 64, 175, 0.06) 100%)",
+                border: "1px dashed #25D366",
+                borderRadius: 10,
+                padding: "10px 12px",
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+              }}
+            >
+              <img
+                src="/pix_qrcode.png"
+                alt="QR Code Pix LeoÓticas"
+                style={{
+                  width: 64,
+                  height: 64,
+                  borderRadius: 6,
+                  border: "1px solid #d1d5db",
+                  background: "#fff",
+                  padding: 2,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>QR Code Pix Oficial</span>
+                  <span style={{ fontSize: 10, background: "#25D366", color: "#fff", padding: "1px 6px", borderRadius: 99 }}>
+                    Ativo
+                  </span>
+                </div>
+                <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2, lineHeight: 1.3 }}>
+                  Envie a imagem junto com o texto no WhatsApp para pagamentos instantâneos.
+                </div>
+                <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+                  <a
+                    href="/pix_qrcode.png"
+                    download="qrcode_pix_leooticas.png"
+                    className="btn ghost"
+                    style={{ fontSize: 11, padding: "2px 8px", textDecoration: "none" }}
+                    title="Baixar imagem do QR Code para anexar no WhatsApp"
+                  >
+                    📥 Baixar QR Code
+                  </a>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    style={{ fontSize: 11, padding: "2px 8px" }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(chavePix.trim() || PIX_CHAVE_OFICIAL);
+                      alert("Chave Pix Copia e Cola copiada para a área de transferência!");
+                    }}
+                  >
+                    📋 Copiar Código Pix
+                  </button>
+                </div>
+              </div>
+            </div>
 
             {/* PREVIEW DA MENSAGEM DO WHATSAPP */}
             <div>

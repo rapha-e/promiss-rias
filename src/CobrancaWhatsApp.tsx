@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, setDDD, titulo } from "./lib";
+import { dt, getDDD, linkWhatsApp, money, normalizarTelefones, setDDD, titulo, PIX_CHAVE_OFICIAL } from "./lib";
 import type { Row } from "./lib";
 
 type FiltroPeriodo = "hoje" | "proximos_3" | "vencidas_1_7" | "vencidas_8_30" | "vencidas_30_mais" | "todas";
@@ -42,9 +42,9 @@ export default function CobrancaWhatsApp() {
   const [ddd, setDddLocal] = useState(getDDD());
   const [chavePix, setChavePix] = useState(() => {
     try {
-      return localStorage.getItem(PIX_KEY) || "";
+      return localStorage.getItem(PIX_KEY) || PIX_CHAVE_OFICIAL;
     } catch {
-      return "";
+      return PIX_CHAVE_OFICIAL;
     }
   });
 
@@ -201,7 +201,7 @@ export default function CobrancaWhatsApp() {
       const dias = p.vencimento ? diffDias(hoje, p.vencimento) : 0;
       let statusStr = "";
       if (p.vencimento) {
-        if (dias > 0) statusStr = ` (vencida há ${dias} dias)`;
+        if (dias > 0) statusStr = ` (vencida há ${dias} ${dias === 1 ? "dia" : "dias"})`;
         else if (dias === 0) statusStr = " (vence hoje!)";
         else statusStr = ` (vence em ${-dias} dias)`;
       }
@@ -212,19 +212,18 @@ export default function CobrancaWhatsApp() {
       linhas.push(`• e mais ${item.promissorias.length - 5} parcela(s)`);
     }
 
-    let texto = `Olá, ${primeiroNome}! Tudo bem? Esperamos que sim!\n\n`;
-    texto += `Passando para lembrar referente à sua compra na *LeoÓticas*:\n\n`;
-    texto += `${linhas.join("\n")}\n\n`;
-    texto += `*Total em aberto:* ${money(item.valorTotal)}\n\n`;
+    const chaveAtual = (chavePix.trim() || PIX_CHAVE_OFICIAL).trim();
 
-    if (chavePix.trim()) {
-      texto += `🔑 *Chave PIX:* \`${chavePix.trim()}\`\n\n`;
-    }
-
-    texto += `Caso já tenha efetuado o pagamento, por favor desconsidere este aviso.\n`;
-    texto += `Se precisar de auxílio ou da 2ª via, é só nos responder aqui. Obrigado! 🙏`;
-
-    return texto;
+    return (
+      `Olá, ${primeiroNome}! Tudo bem? Esperamos que você esteja tendo um excelente dia! 👓✨\n\n` +
+      `Passando com todo carinho para um lembrete amigo referente à sua compra na *LeoÓticas*:\n\n` +
+      `${linhas.join("\n")}\n\n` +
+      `*Total em aberto:* ${money(item.valorTotal)}\n\n` +
+      `Para sua comodidade e para resolver direto do celular em menos de 1 minuto, basta escanear o QR Code acima ou usar o código Pix Copia e Cola abaixo:\n\n` +
+      `📋 *Pix Copia e Cola Oficial da LeoÓticas:*\n\`${chaveAtual}\`\n\n` +
+      `Sabemos que a correria do dia a dia é grande e imprevistos acontecem. Se você já realizou o pagamento, por favor desconsidere este aviso com total tranquilidade! 👍\n\n` +
+      `Se precisar combinar uma data melhor ou tirar dúvidas, é só responder aqui. Estamos sempre à disposição! Um abraço carinhoso da nossa equipe! 🙏😊`
+    );
   };
 
   // Disparar WhatsApp e avançar
@@ -338,10 +337,32 @@ export default function CobrancaWhatsApp() {
           <input
             value={chavePix}
             onChange={e => handleSalvarPix(e.target.value)}
-            placeholder="CNPJ, telefone ou chave aleatória para incluir na mensagem"
+            placeholder="Chave Pix para incluir na mensagem"
             style={{ flex: 1, padding: "6px 10px" }}
           />
         </label>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, background: "var(--card)", padding: "6px 12px", borderRadius: 8, border: "1px dashed #25D366" }}>
+          <img src="/pix_qrcode.png" alt="QR Code Pix" style={{ width: 36, height: 36, borderRadius: 4, background: "#fff", padding: 1 }} />
+          <div style={{ fontSize: 11 }}>
+            <b>QR Code Pix Oficial</b>
+            <div style={{ display: "flex", gap: 6, marginTop: 2 }}>
+              <a href="/pix_qrcode.png" download="qrcode_pix_leooticas.png" style={{ color: "var(--brand)", textDecoration: "underline", fontSize: 11 }}>
+                📥 Baixar Imagem
+              </a>
+              <span>•</span>
+              <button
+                type="button"
+                style={{ background: "none", border: "none", color: "var(--brand)", cursor: "pointer", padding: 0, fontSize: 11, textDecoration: "underline" }}
+                onClick={() => {
+                  navigator.clipboard.writeText(chavePix.trim() || PIX_CHAVE_OFICIAL);
+                  alert("Código Pix copiado!");
+                }}
+              >
+                📋 Copiar Código
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Seletor de Períodos de Cobrança */}
@@ -525,8 +546,32 @@ export default function CobrancaWhatsApp() {
 
             {/* Lado Direito: Pré-visualização da Mensagem */}
             <div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", marginBottom: 6 }}>
-                Pré-visualização da Mensagem:
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6, flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase" }}>
+                  Pré-visualização da Mensagem:
+                </span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <a
+                    href="/pix_qrcode.png"
+                    download="qrcode_pix_leooticas.png"
+                    className="btn ghost"
+                    style={{ fontSize: 11, padding: "2px 8px", textDecoration: "none" }}
+                    title="Baixar imagem do QR Code para anexar no WhatsApp"
+                  >
+                    📥 Baixar QR Code
+                  </a>
+                  <button
+                    type="button"
+                    className="btn ghost"
+                    style={{ fontSize: 11, padding: "2px 8px" }}
+                    onClick={() => {
+                      navigator.clipboard.writeText(gerarMensagem(clienteAtual));
+                      alert("Mensagem copiada para a área de transferência!");
+                    }}
+                  >
+                    📋 Copiar Texto
+                  </button>
+                </div>
               </div>
               <div
                 style={{
