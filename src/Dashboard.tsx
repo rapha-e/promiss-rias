@@ -1,6 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
-import { baixarCSV, dt, hoje, money, normalizarTelefones, obterPromessasPagamento, marcarPromessaCumprida } from "./lib";
+import {
+  baixarCSV, dt, hoje, money, normalizarTelefones, obterPromessasPagamento, marcarPromessaCumprida,
+  formatarMascaraMoeda, desmascararMoeda,
+} from "./lib";
 import type { Row, Status, PromessaPagamento } from "./lib";
 import { FichaCliente, WhatsDialog } from "./Dialogs";
 
@@ -60,7 +63,22 @@ function calcularDiasAtraso(dataHoje: string, venc: string | null): number {
   return Math.round((tH - tV) / (1000 * 60 * 60 * 24));
 }
 
-const META_KEY = "leooticas_meta_recuperacao_mensal";
+const META_RECUPERACAO_KEY = "leooticas_meta_recuperacao_inadimplentes";
+const META_GLOBAL_KEY = "leooticas_meta_arrecadacao_global";
+const MODO_META_KEY = "leooticas_modo_meta_dashboard";
+
+export type DadosRecuperacaoMes = {
+  totalCaixa: number;
+  totalInadimplencia: number;
+  faixas: {
+    ate30: number;
+    d30a60: number;
+    d60a90: number;
+    d90a180: number;
+    mais180: number;
+    emDia: number;
+  };
+};
 
 export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: string, filtro?: string) => void }) {
   const [resumo, setResumo] = useState<ResumoRPC | null>(null);
@@ -72,14 +90,54 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   const [whats, setWhats] = useState<{ cliente: string; telefone: string; valor: number; vencimento?: string } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
   const [promessas, setPromessas] = useState<PromessaPagamento[]>([]);
-  const [metaMensal, setMetaMensal] = useState<number>(() => {
+  
+  // Modos de Meta: "inadimplentes" (crédito vencido recuperado) ou "global" (total recebido em caixa)
+  const [modoMeta, setModoMeta] = useState<"inadimplentes" | "global">(() => {
     try {
-      const sal = localStorage.getItem(META_KEY);
-      return sal ? Number(sal) : 15000;
+      const s = localStorage.getItem(MODO_META_KEY);
+      return s === "global" ? "global" : "inadimplentes";
     } catch {
-      return 15000;
+      return "inadimplentes";
     }
   });
+
+  const [metaRecuperacao, setMetaRecuperacao] = useState<number>(() => {
+    try {
+      const sal = localStorage.getItem(META_RECUPERACAO_KEY) || localStorage.getItem("leooticas_meta_recuperacao_mensal");
+      if (!sal) return 1500000; // Padrão R$ 15.000,00
+      const n = Number(sal);
+      if (n > 0 && n < 100000) return n * 100;
+      return n > 0 ? n : 1500000;
+    } catch {
+      return 1500000;
+    }
+  });
+
+  const [metaGlobal, setMetaGlobal] = useState<number>(() => {
+    try {
+      const sal = localStorage.getItem(META_GLOBAL_KEY);
+      if (!sal) return 3000000; // Padrão R$ 30.000,00
+      const n = Number(sal);
+      if (n > 0 && n < 100000) return n * 100;
+      return n > 0 ? n : 3000000;
+    } catch {
+      return 3000000;
+    }
+  });
+
+  const [dadosRecuperacao, setDadosRecuperacao] = useState<DadosRecuperacaoMes>({
+    totalCaixa: 0,
+    totalInadimplencia: 0,
+    faixas: {
+      ate30: 0,
+      d30a60: 0,
+      d60a90: 0,
+      d90a180: 0,
+      mais180: 0,
+      emDia: 0,
+    },
+  });
+
   const [editandoMeta, setEditandoMeta] = useState(false);
   const [novaMetaStr, setNovaMetaStr] = useState("");
 
@@ -134,6 +192,103 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         .from("promissorias")
         .select("id, cliente_nome, saldo_devedor, divida_total")
         .eq("fundo_perdido", true);
+
+      // 4. Busca recuperação do mês corrente e categoriza por tempo de atraso (Aging da Recuperação)
+      const pagamentosMap = new Map<string, { valor: number; diasAtraso: number }>();
+      const [anoAtual, mesAtual] = dataHoje.split("-");
+      const mesAnoFiltro = `${anoAtual}-${mesAtual}`;
+      const inicioMesIso = `${anoAtual}-${mesAtual}-01T00:00:00Z`;
+      const proximoAno = Number(mesAtual) === 12 ? Number(anoAtual) + 1 : Number(anoAtual);
+      const proximoMes = Number(mesAtual) === 12 ? 1 : Number(mesAtual) + 1;
+      const inicioProxMesIso = `${proximoAno}-${String(proximoMes).padStart(2, "0")}-01T00:00:00Z`;
+
+      // 4.1 Consulta tabela de pagamentos dedicada (se existir)
+      try {
+        const { data: pags, error: errPags } = await supabase
+          .from("promissoria_pagamentos")
+          .select("promissoria_id, valor_pago, data_pagamento, promissorias(vencimento)")
+          .gte("data_pagamento", inicioMesIso)
+          .lt("data_pagamento", inicioProxMesIso);
+
+        if (!errPags && pags) {
+          for (const p of pags) {
+            const key = `${p.promissoria_id}_${p.data_pagamento}_${p.valor_pago}`;
+            const dtPag = new Date((p.data_pagamento || "").slice(0, 10) + "T00:00:00Z").getTime();
+            const venc = (p.promissorias as any)?.vencimento;
+            const dtVenc = venc ? new Date(venc + "T00:00:00Z").getTime() : 0;
+            const diasAtraso = dtVenc ? Math.round((dtPag - dtVenc) / 86400000) : 0;
+            pagamentosMap.set(key, { valor: p.valor_pago || 0, diasAtraso });
+          }
+        }
+      } catch (_) {}
+
+      // 4.2 Consulta promissórias com baixas registradas em 'origem' no mês corrente
+      try {
+        const { data: baixasOrigem, error: errOrigem } = await supabase
+          .from("promissorias")
+          .select("id, vencimento, origem")
+          .ilike("origem", `%${mesAnoFiltro}%`);
+
+        if (!errOrigem && baixasOrigem) {
+          for (const row of baixasOrigem) {
+            if (!row.origem) continue;
+            try {
+              const parsed = JSON.parse(row.origem);
+              if (Array.isArray(parsed)) {
+                for (const item of parsed) {
+                  if (item.data && typeof item.data === "string" && item.data.startsWith(mesAnoFiltro)) {
+                    const val = item.valor || 0;
+                    const key = `${row.id}_${item.data}_${val}`;
+                    if (!pagamentosMap.has(key)) {
+                      const dtPag = new Date(item.data.slice(0, 10) + "T00:00:00Z").getTime();
+                      const dtVenc = row.vencimento ? new Date(row.vencimento + "T00:00:00Z").getTime() : 0;
+                      const diasAtraso = dtVenc ? Math.round((dtPag - dtVenc) / 86400000) : 0;
+                      pagamentosMap.set(key, { valor: val, diasAtraso });
+                    }
+                  }
+                }
+              }
+            } catch (_) {}
+          }
+        }
+      } catch (_) {}
+
+      let totalCaixa = 0;
+      let totalInadimplencia = 0;
+      const faixas = {
+        ate30: 0,
+        d30a60: 0,
+        d60a90: 0,
+        d90a180: 0,
+        mais180: 0,
+        emDia: 0,
+      };
+
+      for (const item of pagamentosMap.values()) {
+        totalCaixa += item.valor;
+        if (item.diasAtraso <= 0) {
+          faixas.emDia += item.valor;
+        } else {
+          totalInadimplencia += item.valor;
+          if (item.diasAtraso <= 30) {
+            faixas.ate30 += item.valor;
+          } else if (item.diasAtraso <= 60) {
+            faixas.d30a60 += item.valor;
+          } else if (item.diasAtraso <= 90) {
+            faixas.d60a90 += item.valor;
+          } else if (item.diasAtraso <= 180) {
+            faixas.d90a180 += item.valor;
+          } else {
+            faixas.mais180 += item.valor;
+          }
+        }
+      }
+
+      setDadosRecuperacao({
+        totalCaixa,
+        totalInadimplencia,
+        faixas,
+      });
 
       setResumo(res);
       setAbertas(listaAbertas);
@@ -413,6 +568,49 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
     window.print();
   };
 
+  // Metadados do Mês Corrente (Dias, Ritmo, Projeção e Taxa de Resgate)
+  const metaInfo = useMemo(() => {
+    const [anoStr, mesStr, diaStr] = dataHoje.split("-");
+    const ano = Number(anoStr) || 2026;
+    const mes = Number(mesStr) || 10;
+    const dia = Number(diaStr) || 1;
+
+    const dataObj = new Date(ano, mes - 1, dia);
+    const nomeMes = dataObj.toLocaleDateString("pt-BR", { month: "long" });
+    const nomeMesCapitalizado = nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1);
+
+    const totalDiasMes = new Date(ano, mes, 0).getDate();
+    const diasPassados = Math.min(dia, totalDiasMes);
+    const diasRestantes = Math.max(0, totalDiasMes - diasPassados);
+
+    const metaAtiva = modoMeta === "inadimplentes" ? metaRecuperacao : metaGlobal;
+    const valorAtivo = modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa;
+
+    const mediaDiaria = diasPassados > 0 ? valorAtivo / diasPassados : 0;
+    const projecaoFechamento = diasPassados > 0 ? Math.round(mediaDiaria * totalDiasMes) : 0;
+    const pct = metaAtiva > 0 ? (valorAtivo / metaAtiva) * 100 : 0;
+
+    // Ideia 3: Taxa de Resgate da Inadimplência
+    const totalVencidoAtual = metricas.totalVencidoValor || 0;
+    const poolVencido = totalVencidoAtual + dadosRecuperacao.totalInadimplencia;
+    const taxaResgate = poolVencido > 0 ? (dadosRecuperacao.totalInadimplencia / poolVencido) * 100 : 0;
+
+    return {
+      nomeMes: nomeMesCapitalizado,
+      totalDiasMes,
+      diasPassados,
+      diasRestantes,
+      metaAtiva,
+      valorAtivo,
+      mediaDiaria,
+      projecaoFechamento,
+      pct,
+      taxaResgate,
+      totalVencidoAtual,
+      poolVencido,
+    };
+  }, [dataHoje, modoMeta, metaRecuperacao, metaGlobal, dadosRecuperacao, metricas.totalVencidoValor]);
+
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--mut)" }}>
@@ -602,11 +800,12 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
 
       {/* BLOCO EXTRA: META MENSAL DE RECUPERAÇÃO & PROMESSAS DE HOJE */}
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 22 }}>
-        {/* Card Meta Mensal */}
-        <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        {/* Card Meta Mensal com Inteligência de Inadimplência & Aging */}
+        <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Topo: Título + Botão Editar */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
             <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em" }}>
-              🎯 Meta de Recuperação do Mês
+              {modoMeta === "inadimplentes" ? "🎯 Meta de Inadimplência Recuperada" : "💰 Meta de Arrecadação Global (Caixa)"} • {metaInfo.nomeMes}
             </span>
             <button
               type="button"
@@ -614,41 +813,154 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               style={{ fontSize: 11, padding: "2px 8px" }}
               onClick={() => {
                 if (editandoMeta) {
-                  const val = Number(novaMetaStr.replace(/\D/g, "")) / 100;
-                  if (!isNaN(val) && val > 0) {
-                    setMetaMensal(val);
-                    try { localStorage.setItem(META_KEY, String(val)); } catch {}
+                  const val = desmascararMoeda(novaMetaStr);
+                  if (val > 0) {
+                    if (modoMeta === "inadimplentes") {
+                      setMetaRecuperacao(val);
+                      try { localStorage.setItem(META_RECUPERACAO_KEY, String(val)); } catch {}
+                    } else {
+                      setMetaGlobal(val);
+                      try { localStorage.setItem(META_GLOBAL_KEY, String(val)); } catch {}
+                    }
                   }
                   setEditandoMeta(false);
                 } else {
-                  setNovaMetaStr(metaMensal.toFixed(2));
+                  setNovaMetaStr(formatarMascaraMoeda(metaInfo.metaAtiva));
                   setEditandoMeta(true);
                 }
               }}
             >
-              {editandoMeta ? "Salvar Meta" : "Editar Meta"}
+              {editandoMeta ? "Fechar" : "Editar Meta"}
             </button>
           </div>
 
+          {/* Seletor de Modo (Ideia 4: Inadimplentes vs Global) */}
+          <div style={{ display: "flex", background: "var(--soft)", padding: 3, borderRadius: 8, gap: 4, alignSelf: "flex-start" }}>
+            <button
+              type="button"
+              style={{
+                border: "none",
+                cursor: "pointer",
+                fontSize: 11.5,
+                fontWeight: modoMeta === "inadimplentes" ? 700 : 500,
+                padding: "4px 10px",
+                borderRadius: 6,
+                background: modoMeta === "inadimplentes" ? "var(--card)" : "transparent",
+                color: modoMeta === "inadimplentes" ? "var(--brand)" : "var(--mut)",
+                boxShadow: modoMeta === "inadimplentes" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all .15s ease",
+              }}
+              onClick={() => {
+                setModoMeta("inadimplentes");
+                try { localStorage.setItem(MODO_META_KEY, "inadimplentes"); } catch {}
+              }}
+            >
+              🎯 Inadimplência Recuperada
+            </button>
+            <button
+              type="button"
+              style={{
+                border: "none",
+                cursor: "pointer",
+                fontSize: 11.5,
+                fontWeight: modoMeta === "global" ? 700 : 500,
+                padding: "4px 10px",
+                borderRadius: 6,
+                background: modoMeta === "global" ? "var(--card)" : "transparent",
+                color: modoMeta === "global" ? "var(--brand)" : "var(--mut)",
+                boxShadow: modoMeta === "global" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+                transition: "all .15s ease",
+              }}
+              onClick={() => {
+                setModoMeta("global");
+                try { localStorage.setItem(MODO_META_KEY, "global"); } catch {}
+              }}
+            >
+              💰 Arrecadação Global (Caixa)
+            </button>
+          </div>
+
+          {/* Edição ou Exibição da Meta */}
           {editandoMeta ? (
-            <div style={{ display: "flex", gap: 6 }}>
+            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input
-                type="number"
-                step="100"
+                type="text"
+                autoFocus
                 value={novaMetaStr}
-                onChange={e => setNovaMetaStr(e.target.value)}
-                placeholder="Ex: 15000"
-                style={{ flex: 1, padding: "6px 8px", fontSize: 13, fontWeight: 700 }}
+                onChange={e => setNovaMetaStr(formatarMascaraMoeda(e.target.value))}
+                onKeyDown={e => {
+                  if (e.key === "Enter") {
+                    const val = desmascararMoeda(novaMetaStr);
+                    if (val > 0) {
+                      if (modoMeta === "inadimplentes") {
+                        setMetaRecuperacao(val);
+                        try { localStorage.setItem(META_RECUPERACAO_KEY, String(val)); } catch {}
+                      } else {
+                        setMetaGlobal(val);
+                        try { localStorage.setItem(META_GLOBAL_KEY, String(val)); } catch {}
+                      }
+                    }
+                    setEditandoMeta(false);
+                  } else if (e.key === "Escape") {
+                    setEditandoMeta(false);
+                  }
+                }}
+                placeholder="R$ 0,00"
+                style={{
+                  flex: 1,
+                  padding: "6px 10px",
+                  fontSize: 14,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  border: "1px solid var(--brand)",
+                  background: "var(--bg)",
+                  color: "var(--fg)",
+                  fontFamily: "monospace",
+                }}
               />
+              <button
+                type="button"
+                className="btn primary"
+                style={{ fontSize: 12, padding: "6px 12px" }}
+                onClick={() => {
+                  const val = desmascararMoeda(novaMetaStr);
+                  if (val > 0) {
+                    if (modoMeta === "inadimplentes") {
+                      setMetaRecuperacao(val);
+                      try { localStorage.setItem(META_RECUPERACAO_KEY, String(val)); } catch {}
+                    } else {
+                      setMetaGlobal(val);
+                      try { localStorage.setItem(META_GLOBAL_KEY, String(val)); } catch {}
+                    }
+                  }
+                  setEditandoMeta(false);
+                }}
+              >
+                Salvar
+              </button>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ fontSize: 12, padding: "6px 10px" }}
+                onClick={() => setEditandoMeta(false)}
+              >
+                Cancelar
+              </button>
             </div>
           ) : (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
               <div>
-                <b style={{ fontSize: 22 }}>{money(metaMensal)}</b>
-                <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>alvo do mês</span>
+                <b style={{ fontSize: 24 }}>{money(metaInfo.metaAtiva)}</b>
+                <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>
+                  {modoMeta === "inadimplentes" ? "alvo de recuperação" : "alvo de faturamento"}
+                </span>
               </div>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--brand)" }}>
-                {((metricas.totalPago / (metaMensal || 1)) * 100).toFixed(0)}% da meta
+              <span style={{
+                fontSize: 13,
+                fontWeight: 700,
+                color: metaInfo.pct >= 100 ? "#10b981" : metaInfo.pct >= 70 ? "#0284c7" : "#d97706",
+              }}>
+                {metaInfo.pct.toFixed(1)}% da meta
               </span>
             </div>
           )}
@@ -658,17 +970,153 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             <div
               style={{
                 height: "100%",
-                width: `${Math.min(100, (metricas.totalPago / (metaMensal || 1)) * 100)}%`,
-                background: "linear-gradient(90deg, #16a34a, #10b981)",
+                width: `${Math.min(100, Math.max(0, metaInfo.pct))}%`,
+                background: metaInfo.pct >= 100
+                  ? "linear-gradient(90deg, #10b981, #059669)"
+                  : metaInfo.pct >= 70
+                  ? "linear-gradient(90deg, #0284c7, #10b981)"
+                  : "linear-gradient(90deg, #f59e0b, #10b981)",
                 borderRadius: 99,
                 transition: "width .4s ease",
               }}
             />
           </div>
 
-          <div style={{ fontSize: 11.5, color: "var(--mut)", display: "flex", justifyContent: "space-between" }}>
-            <span>Recuperado: <b>{money(metricas.totalPago)}</b></span>
-            <span>Restante: <b>{money(Math.max(0, metaMensal - metricas.totalPago))}</b></span>
+          {/* Valores Recuperado e Restante */}
+          <div style={{ fontSize: 12, color: "var(--mut)", display: "flex", justifyContent: "space-between" }}>
+            <span>
+              {modoMeta === "inadimplentes" ? "Inadimplência Recuperada:" : "Entradas em Caixa:"}{" "}
+              <b style={{ color: "var(--fg)" }}>{money(metaInfo.valorAtivo)}</b>
+            </span>
+            <span>
+              Restante: <b style={{ color: "var(--fg)" }}>{money(Math.max(0, metaInfo.metaAtiva - metaInfo.valorAtivo))}</b>
+            </span>
+          </div>
+
+          {/* Ideia 3: Taxa de Resgate da Inadimplência */}
+          <div style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            background: "rgba(16, 185, 129, 0.08)",
+            border: "1px solid rgba(16, 185, 129, 0.25)",
+            borderRadius: 8,
+            padding: "8px 10px",
+            fontSize: 11.5,
+          }}>
+            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span>🛡️</span>
+              <span><b>Taxa de Resgate:</b> {metaInfo.taxaResgate.toFixed(1)}% da inadimplência resgatada</span>
+            </span>
+            <span style={{ color: "var(--mut)", fontSize: 11 }}>
+              {money(dadosRecuperacao.totalInadimplencia)} de {money(metaInfo.poolVencido)}
+            </span>
+          </div>
+
+          {/* Ideia 2: Composição da Recuperação por Idade da Dívida */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--mut)" }}>
+                📊 Idade da Dívida Recuperada (Aging)
+              </span>
+              <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
+                {modoMeta === "inadimplentes" ? "Base: dívidas vencidas" : "Entradas totais"}
+              </span>
+            </div>
+
+            {/* Barra Multi-colorida Proporcional das Faixas */}
+            {dadosRecuperacao.totalInadimplencia > 0 && (
+              <div style={{ height: 8, width: "100%", background: "var(--line)", borderRadius: 99, display: "flex", overflow: "hidden" }}>
+                {dadosRecuperacao.faixas.ate30 > 0 && (
+                  <div
+                    title={`Até 30 dias: ${money(dadosRecuperacao.faixas.ate30)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.ate30 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#10b981" }}
+                  />
+                )}
+                {dadosRecuperacao.faixas.d30a60 > 0 && (
+                  <div
+                    title={`30 a 60 dias: ${money(dadosRecuperacao.faixas.d30a60)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.d30a60 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#0284c7" }}
+                  />
+                )}
+                {dadosRecuperacao.faixas.d60a90 > 0 && (
+                  <div
+                    title={`60 a 90 dias: ${money(dadosRecuperacao.faixas.d60a90)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.d60a90 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#f59e0b" }}
+                  />
+                )}
+                {dadosRecuperacao.faixas.d90a180 > 0 && (
+                  <div
+                    title={`90 a 180 dias: ${money(dadosRecuperacao.faixas.d90a180)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.d90a180 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#ea580c" }}
+                  />
+                )}
+                {dadosRecuperacao.faixas.mais180 > 0 && (
+                  <div
+                    title={`+180 dias: ${money(dadosRecuperacao.faixas.mais180)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.mais180 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#9333ea" }}
+                  />
+                )}
+                {modoMeta === "global" && dadosRecuperacao.faixas.emDia > 0 && (
+                  <div
+                    title={`Em dia: ${money(dadosRecuperacao.faixas.emDia)}`}
+                    style={{ width: `${(dadosRecuperacao.faixas.emDia / dadosRecuperacao.totalCaixa) * 100}%`, background: "#06b6d4" }}
+                  />
+                )}
+              </div>
+            )}
+
+            {/* Grid com os 5 cards/pills com as margens solicitadas */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))", gap: 6, marginTop: 4 }}>
+              <div style={{ background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#10b981", textTransform: "uppercase" }}>Até 30 dias</div>
+                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.ate30)}</b>
+              </div>
+              <div style={{ background: "rgba(2, 132, 199, 0.08)", border: "1px solid rgba(2, 132, 199, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#0284c7", textTransform: "uppercase" }}>30 a 60 dias</div>
+                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d30a60)}</b>
+              </div>
+              <div style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase" }}>60 a 90 dias</div>
+                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d60a90)}</b>
+              </div>
+              <div style={{ background: "rgba(234, 88, 12, 0.08)", border: "1px solid rgba(234, 88, 12, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#ea580c", textTransform: "uppercase" }}>90 a 180 dias</div>
+                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d90a180)}</b>
+              </div>
+              <div style={{ background: "rgba(147, 51, 234, 0.08)", border: "1px solid rgba(147, 51, 234, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, color: "#9333ea", textTransform: "uppercase" }}>+180 dias (Antigas)</div>
+                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.mais180)}</b>
+              </div>
+              {modoMeta === "global" && (
+                <div style={{ background: "rgba(6, 182, 212, 0.08)", border: "1px solid rgba(6, 182, 212, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: "#06b6d4", textTransform: "uppercase" }}>Em dia / Adiant.</div>
+                  <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.emDia)}</b>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Rodapé: Ritmo Diário e Projeção de Fechamento */}
+          <div style={{
+            fontSize: 11,
+            color: "var(--mut)",
+            paddingTop: 8,
+            borderTop: "1px dashed var(--line)",
+            display: "flex",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 6,
+          }}>
+            <span>Média: <b>{money(metaInfo.mediaDiaria)}/dia</b></span>
+            <span>
+              Projeção: <b style={{ color: metaInfo.projecaoFechamento >= metaInfo.metaAtiva ? "#10b981" : "inherit" }}>{money(metaInfo.projecaoFechamento)}</b> ({metaInfo.diasRestantes} dias rest.)
+            </span>
+            {modoMeta === "inadimplentes" && (
+              <span style={{ width: "100%", fontSize: 10.5, color: "var(--mut)", borderTop: "1px solid var(--soft)", paddingTop: 4 }}>
+                💳 Total em caixa no mês: <b>{money(dadosRecuperacao.totalCaixa)}</b> ({money(dadosRecuperacao.faixas.emDia)} em dia)
+              </span>
+            )}
           </div>
         </div>
 

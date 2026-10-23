@@ -10,6 +10,21 @@ export type Item = { valor: number; vencimento: string | null };
 const fmt = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
 export const money = (c: number) => fmt.format(c / 100);
 export const toBRL = (c: number) => (c / 100).toFixed(2).replace(".", ",");
+
+/** Formata texto numérico ou centavos com máscara monetária brasileira (ex.: "R$ 1.500,00") */
+export function formatarMascaraMoeda(valorOuTexto: number | string): string {
+  const digits = typeof valorOuTexto === "number"
+    ? Math.round(valorOuTexto).toString()
+    : valorOuTexto.replace(/\D/g, "");
+  const centavos = parseInt(digits, 10) || 0;
+  return fmt.format(centavos / 100);
+}
+
+/** Extrai o valor em centavos a partir de texto mascarado ou com dígitos */
+export function desmascararMoeda(texto: string): number {
+  const digits = (texto || "").replace(/\D/g, "");
+  return digits ? parseInt(digits, 10) : 0;
+}
 export const LBL: Record<Status, string> = {
   QUITADO: "Quitado",
   PAGANDO: "Pagando",
