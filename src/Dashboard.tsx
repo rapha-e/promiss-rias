@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import {
   baixarCSV, dt, hoje, money, normalizarTelefones, obterPromessasPagamento, marcarPromessaCumprida,
-  formatarMascaraMoeda, desmascararMoeda,
+  formatarMascaraMoeda, desmascararMoeda, mascaraTelefone,
 } from "./lib";
 import type { Row, Status, PromessaPagamento } from "./lib";
 import { FichaCliente, WhatsDialog } from "./Dialogs";
@@ -1125,10 +1125,17 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           </div>
         </div>
 
-        {/* Card Promessas de Pagamento para Hoje */}
+        {/* Card Promessas de Pagamento (Dividido em Promessas para Hoje e Datas Posteriores) */}
         {(() => {
-          const promessasHoje = promessas.filter(p => !p.cumprida && p.dataPromessa === dataHoje);
+          const promessasNaoCumpridas = promessas.filter(p => !p.cumprida);
+          const promessasHoje = promessasNaoCumpridas.filter(p => p.dataPromessa === dataHoje);
+          const promessasPosteriores = promessasNaoCumpridas
+            .filter(p => p.dataPromessa > dataHoje)
+            .sort((a, b) => a.dataPromessa.localeCompare(b.dataPromessa));
+          const promessasAtrasadas = promessasNaoCumpridas.filter(p => p.dataPromessa < dataHoje);
+
           const totalPrometidoHoje = promessasHoje.reduce((s, p) => s + p.valor, 0);
+          const totalPrometidoPosterior = promessasPosteriores.reduce((s, p) => s + p.valor, 0);
 
           return (
             <div
@@ -1138,82 +1145,226 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                 borderLeft: "5px solid #d97706",
                 display: "flex",
                 flexDirection: "column",
-                justifyContent: "space-between",
-                gap: 8,
-                background: promessasHoje.length > 0 ? "rgba(217, 119, 6, 0.05)" : "var(--card)",
+                gap: 14,
+                background: promessasHoje.length > 0 ? "rgba(217, 119, 6, 0.03)" : "var(--card)",
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#d97706" }}>
-                  📅 Promessas para Hoje ({promessasHoje.length})
-                </span>
-                <span style={{ fontSize: 11, color: "var(--mut)" }}>{dt(dataHoje)}</span>
-              </div>
-
-              {promessasHoje.length === 0 ? (
-                <div style={{ fontSize: 12.5, color: "var(--mut)", padding: "10px 0" }}>
-                  Nenhuma promessa de pagamento registrada para hoje. Combine novas datas na Central de Renegociação!
+              {/* SEÇÃO 1: PROMESSAS PARA HOJE */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#d97706", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>📅</span> PROMESSAS PARA HOJE ({promessasHoje.length})
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--mut)" }}>{dt(dataHoje)}</span>
                 </div>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 110, overflowY: "auto" }}>
-                  {promessasHoje.map(p => (
-                    <div
-                      key={p.id}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        alignItems: "center",
-                        fontSize: 12,
-                        padding: "4px 6px",
-                        background: "var(--card)",
-                        borderRadius: 6,
-                        border: "1px solid var(--line)",
-                      }}
-                    >
-                      <div>
-                        <b>{p.cliente}</b>
-                        <span style={{ marginLeft: 6, color: "var(--mut)", fontSize: 11 }}>{p.telefone || "Sem tel"}</span>
-                        {p.observacao && <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Obs: {p.observacao}</div>}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ fontWeight: 700, color: "var(--brand)" }}>{money(p.valor)}</span>
-                        {p.telefone && (
+
+                {promessasHoje.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--mut)", padding: "4px 0" }}>
+                    Nenhuma promessa de pagamento para hoje.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {promessasHoje.map(p => (
+                      <div
+                        key={p.id}
+                        style={{
+                          display: "flex",
+                          justifyContent: "space-between",
+                          alignItems: "center",
+                          fontSize: 12.5,
+                          padding: "8px 10px",
+                          background: "var(--card)",
+                          borderRadius: 8,
+                          border: "1px solid var(--line)",
+                          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{p.cliente}</div>
+                          <div style={{ color: "var(--mut)", fontSize: 11, marginTop: 1 }}>{p.telefone ? mascaraTelefone(p.telefone) : "Sem tel"}</div>
+                          {p.observacao && (
+                            <div style={{ fontSize: 11, color: "var(--brand)", marginTop: 2, fontStyle: "italic", wordBreak: "break-word" }}>
+                              Obs: {p.observacao}
+                            </div>
+                          )}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                          <span style={{ fontWeight: 700, color: "#d97706", fontSize: 13 }}>{money(p.valor)}</span>
+                          {p.telefone && (
+                            <button
+                              type="button"
+                              className="btn-baixa"
+                              style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                              onClick={() =>
+                                setWhats({
+                                  cliente: p.cliente,
+                                  telefone: p.telefone,
+                                  valor: p.valor,
+                                })
+                              }
+                              title="Cobrar promessa no WhatsApp"
+                            >
+                              Cobrar
+                            </button>
+                          )}
                           <button
                             type="button"
-                            className="btn-baixa"
-                            style={{ padding: "2px 6px", fontSize: 11, background: "#25D366" }}
-                            onClick={() =>
-                              setWhats({
-                                cliente: p.cliente,
-                                telefone: p.telefone,
-                                valor: p.valor,
-                              })
-                            }
-                            title="Cobrar promessa no WhatsApp"
+                            className="btn ghost"
+                            style={{ padding: "3px 8px", fontSize: 11 }}
+                            onClick={() => {
+                              marcarPromessaCumprida(p.id);
+                              setPromessas(obterPromessasPagamento());
+                            }}
+                            title="Marcar como cumprida"
                           >
-                            Cobrar
+                            ✓
                           </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn ghost"
-                          style={{ padding: "2px 6px", fontSize: 11 }}
-                          onClick={() => {
-                            marcarPromessaCumprida(p.id);
-                            setPromessas(obterPromessasPagamento());
-                          }}
-                          title="Marcar como cumprida"
-                        >
-                          ✓
-                        </button>
+                        </div>
                       </div>
-                    </div>
-                  ))}
-                </div>
-              )}
+                    ))}
+                  </div>
+                )}
 
-              <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 600 }}>
-                {promessasHoje.length > 0 ? `Total prometido para hoje: ${money(totalPrometidoHoje)}` : "Mantenha o follow-up diário para reduzir atrasos."}
+                <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 600 }}>
+                  Total prometido para hoje: <b>{money(totalPrometidoHoje)}</b>
+                </div>
+              </div>
+
+              {/* DIVISOR ELEGANTE */}
+              <div style={{ borderTop: "1px dashed var(--line)" }} />
+
+              {/* SEÇÃO 2: DEMAIS PROMESSAS (DATAS POSTERIORES) */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#0284c7", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>🗓️</span> DEMAIS PROMESSAS (DATAS POSTERIORES) ({promessasPosteriores.length})
+                  </span>
+                  <span style={{ fontSize: 11, color: "var(--mut)" }}>
+                    Total: <b>{money(totalPrometidoPosterior)}</b>
+                  </span>
+                </div>
+
+                {promessasPosteriores.length === 0 ? (
+                  <div style={{ fontSize: 12, color: "var(--mut)", padding: "4px 0" }}>
+                    Nenhuma promessa futura cadastrada.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {promessasPosteriores.map(p => {
+                      const tHoje = new Date(dataHoje + "T00:00:00Z").getTime();
+                      const tData = new Date(p.dataPromessa + "T00:00:00Z").getTime();
+                      const diffDias = Math.round((tData - tHoje) / 86400000);
+                      const labelPrazo = diffDias === 1 ? "Amanhã" : `Em ${diffDias} dias`;
+
+                      return (
+                        <div
+                          key={p.id}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: 12.5,
+                            padding: "8px 10px",
+                            background: "var(--card)",
+                            borderRadius: 8,
+                            border: "1px solid var(--line)",
+                            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+                          }}
+                        >
+                          <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                              <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{p.cliente}</span>
+                              <span
+                                className="pill"
+                                style={{
+                                  fontSize: 10.5,
+                                  padding: "1px 6px",
+                                  background: "rgba(2, 132, 199, 0.1)",
+                                  color: "#0369a1",
+                                  borderColor: "#0284c7",
+                                }}
+                              >
+                                {labelPrazo} ({dt(p.dataPromessa)})
+                              </span>
+                            </div>
+                            <div style={{ color: "var(--mut)", fontSize: 11, marginTop: 1 }}>{p.telefone ? mascaraTelefone(p.telefone) : "Sem tel"}</div>
+                            {p.observacao && (
+                              <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2, fontStyle: "italic", wordBreak: "break-word" }}>
+                                Obs: {p.observacao}
+                              </div>
+                            )}
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                            <span style={{ fontWeight: 700, color: "#0284c7", fontSize: 13 }}>{money(p.valor)}</span>
+                            {p.telefone && (
+                              <button
+                                type="button"
+                                className="btn-baixa"
+                                style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                                onClick={() =>
+                                  setWhats({
+                                    cliente: p.cliente,
+                                    telefone: p.telefone,
+                                    valor: p.valor,
+                                  })
+                                }
+                                title="Cobrar promessa no WhatsApp"
+                              >
+                                Cobrar
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn ghost"
+                              style={{ padding: "3px 8px", fontSize: 11 }}
+                              onClick={() => {
+                                marcarPromessaCumprida(p.id);
+                                setPromessas(obterPromessasPagamento());
+                              }}
+                              title="Marcar como cumprida"
+                            >
+                              ✓
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* RODAPÉ DO CARD */}
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  paddingTop: 8,
+                  borderTop: "1px solid var(--line)",
+                  fontSize: 11.5,
+                  marginTop: "auto",
+                }}
+              >
+                {promessasAtrasadas.length > 0 ? (
+                  <span style={{ color: "var(--bad)", fontWeight: 600 }}>
+                    ⚠️ {promessasAtrasadas.length} em atraso anterior
+                  </span>
+                ) : (
+                  <span style={{ color: "var(--mut)" }}>
+                    {promessasNaoCumpridas.length} compromisso{promessasNaoCumpridas.length > 1 ? "s" : ""} ativo{promessasNaoCumpridas.length > 1 ? "s" : ""}
+                  </span>
+                )}
+
+                {onNavegarAba && (
+                  <button
+                    type="button"
+                    className="link-cli"
+                    onClick={() => onNavegarAba("promessas")}
+                    style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
+                  >
+                    Ver Central de Promessas →
+                  </button>
+                )}
               </div>
             </div>
           );
