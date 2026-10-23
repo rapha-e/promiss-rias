@@ -753,30 +753,30 @@ export function mensagemComprovanteBaixa(params: {
   }
   if (!rotuloParcela) rotuloParcela = "Parcela Única";
 
-  // Linha do valor total da compra em X vezes, ex: "Valor total da compra: 1.480,00 em 8x"
+  // Linha do valor total da compra em X vezes, ex: "- Valor total da compra: 1.480,00 em 8x"
   let linhaValorTotalCompra = "";
   if (valorTotalCompra && valorTotalCompra > 0) {
     const totalQtd = totalParcelas
       ? String(totalParcelas).toLowerCase().replace(/[^0-9]/g, "")
       : "";
     const sufixoVezes = totalQtd ? ` em ${totalQtd}x` : "";
-    linhaValorTotalCompra = `Valor total da compra: ${formatarValorSemCifrao(valorTotalCompra)}${sufixoVezes}\n\n`;
+    linhaValorTotalCompra = `- Valor total da compra: ${formatarValorSemCifrao(valorTotalCompra)}${sufixoVezes}\n`;
   }
 
   // 2. QUANDO O CLIENTE QUITA TUDO (100% QUITADO)
   if (valorRestante <= 0) {
     return (
       `Comprovante de Pagamento — LeoÓticas.fin 🧾\n\n` +
-      `Oiii, ${primeiroNome}! Tudo bem?\n\n` +
-      `Recebi o seu pagamento aqui, muito obrigado mesmo! Conta zerada e baixa feita na promissória:\n\n` +
-      `Pagador: ${nome}\n\n` +
+      `Oiii, ${primeiroNome}! Tudo bem? \n\n` +
+      `Recebi o seu pagamento, muito obrigado mesmo, estamos certos, se precisar estou aqui \n\n` +
+      `- Pagador: ${nome}\n` +
       linhaValorTotalCompra +
-      `Valor pago: ${money(valorPago)}\n\n` +
-      `Parcela: ${rotuloParcela}\n\n` +
-      `Valor restante: R$ 0,00 (Dívida 100% quitada! Parabéns e muito obrigado por fechar tudo certinho! 🥳🙌)\n\n` +
-      `Data do pagamento: ${dataPagamento}\n\n` +
-      `Ah, e tem mais: já que você quitou tudo por aqui, que tal dar uma passada na loja pra tomar um café com a gente e conferir as novidades que acabaram de chegar? Estamos com modelos lindos esperando por você! 🕶️✨\n\n` +
-      `Foi um prazer enorme caminhar junto com você nessa jornada. Pode contar com a gente sempre que precisar. Um abraço! 🌟`
+      `- Valor pago: ${money(valorPago)}\n` +
+      `- Parcela: ${rotuloParcela}\n` +
+      `- Valor restante: R$ 0,00 (Dívida 100% quitada! Parabéns e muito obrigado(a) por fechar tudo certinho! 🥳🙌)\n` +
+      `- Data do pagamento: ${dataPagamento}\n\n` +
+      `Ah, e tem mais: já que você quitou tudo por aqui, que tal dar uma passada na loja pra vc conferir as novidades que acabaram de chegar? Estamos com modelos lindos esperando por você! 🕶️✨\n\n` +
+      `Foi um prazer enorme caminhar junto com você nessa jornada, conta com a gente sempre que precisar. Um abraço! 🌟`
     );
   }
 
@@ -786,26 +786,26 @@ export function mensagemComprovanteBaixa(params: {
     const listagem = proximasParcelas.slice(0, 8).map(p => {
       const v = p.vencimento ? dt(p.vencimento) : "A definir";
       const rot = p.parcela.trim().toLowerCase().startsWith("parcela") ? p.parcela.trim() : `Parcela ${p.parcela.trim()}`;
-      return `${rot}: ${money(p.valor)} (venc. ${v})`;
+      return `- ${rot}: ${money(p.valor)} (venc. ${v})`;
     });
     if (proximasParcelas.length > 8) {
-      listagem.push(`• e mais ${proximasParcelas.length - 8} parcela(s)`);
+      listagem.push(`- e mais ${proximasParcelas.length - 8} parcela(s)`);
     }
-    linhasProximas = `\n\nPra você se programar, olha só como ficam os próximos vencimentos:\n\n${listagem.join("\n\n")}`;
+    linhasProximas = `\n\nPra vc se programar, os próximos vencimentos são:\n${listagem.join("\n")}`;
   }
 
   return (
     `Comprovante de Pagamento — LeoÓticas.fin 🧾\n\n` +
-    `Oiii, ${primeiroNome}! Tudo bem?\n\n` +
-    `Recebi o seu pagamento aqui, muito obrigado mesmo! Já vou dar a baixa na promissória certinho:\n\n` +
-    `Pagador: ${nome}\n\n` +
+    `Oiii, ${primeiroNome}! Tudo bem? \n\n` +
+    `Recebi o seu pagamento, muito obrigado mesmo, vou dar baixa aqui \n\n` +
+    `- Pagador: ${nome}\n` +
     linhaValorTotalCompra +
-    `Valor pago: ${money(valorPago)}\n\n` +
-    `Parcela: ${rotuloParcela}\n\n` +
-    `Valor restante: ${money(valorRestante)}\n\n` +
-    `Data do pagamento: ${dataPagamento}` +
+    `- Valor pago: ${money(valorPago)}\n` +
+    `- Parcela: ${rotuloParcela}\n` +
+    `- Valor restante: ${money(valorRestante)}\n` +
+    `- Data do pagamento: ${dataPagamento}` +
     `${linhasProximas}\n\n` +
-    `Qualquer dúvida, é só me chamar por aqui. Tenha um excelente dia! 🙏😊`
+    `Qualquer dúvida é só me chamar por aqui, tenha um excelente dia! 🙏😊`
   );
 }
 
