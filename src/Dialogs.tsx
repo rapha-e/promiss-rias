@@ -1259,10 +1259,6 @@ export function BaixaDialog({
         .from("promissorias")
         .select("*")
         .eq("cliente_nome", row.cliente_nome)
-        .eq("fundo_perdido", false)
-        .gt("saldo_devedor", 0)
-        .neq("id", row.id)
-        .order("vencimento", { ascending: true })
         .order("id", { ascending: true });
 
       if (!active) return;
@@ -1272,60 +1268,43 @@ export function BaixaDialog({
         return;
       }
 
-      const lista = (data || []) as Row[];
+      const todasRows = (data || []) as Row[];
+      const compras = separarComprasCliente(todasRows);
+      const compraAtual = compras.find(c => c.promissorias.some(p => p.id === row.id)) || null;
 
-      // Identificar o carnê da parcela atual (formato X/Y)
-      const mAtual = (row.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
-      const totalCarnêAtual = mAtual ? parseInt(mAtual[2], 10) : null;
-      const numParcelaAtual = mAtual ? parseInt(mAtual[1], 10) : 0;
+      if (compraAtual) {
+        setValorTotalCompra(compraAtual.dividaTotal);
+        setTotalParcelasCarnê(compraAtual.totalParcelas);
 
-      let listaOrdenada = lista;
+        // Somente as outras promissórias EM ABERTO DESTA MESMA COMPRA (isolando de compras distintas)
+        const outrasDestaCompra = compraAtual.promissorias.filter(
+          p => p.id !== row.id && !p.fundo_perdido && (p.saldo_devedor ?? 0) > 0
+        );
 
-      if (totalCarnêAtual) {
-        const doMesmoCarnê: Row[] = [];
-        const deOutrosCarnes: Row[] = [];
+        const mAtual = (row.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+        const numParcelaAtual = mAtual ? parseInt(mAtual[1], 10) : 0;
 
-        for (const r of lista) {
-          const m = (r.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
-          if (m && parseInt(m[2], 10) === totalCarnêAtual) {
-            doMesmoCarnê.push(r);
-          } else {
-            deOutrosCarnes.push(r);
-          }
-        }
-
-        // Ordenar do mesmo carnê: primeiro as posteriores à parcela atual (ex: se pagando 1/6, vem 2/6, 3/6, 4/6...), ordenadas crescentemente
-        doMesmoCarnê.sort((a, b) => {
+        // Ordenar: primeiro as posteriores à parcela atual (ex: se pagando 1/10, vem 2/10, 3/10, 4/10...), ordenadas crescentemente
+        outrasDestaCompra.sort((a, b) => {
           const na = parseInt((a.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
           const nb = parseInt((b.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
-          const aPost = na > numParcelaAtual;
-          const bPost = nb > numParcelaAtual;
-          if (aPost !== bPost) return aPost ? -1 : 1;
-          return na - nb;
-        });
-
-        // Ordenar outros carnês por vencimento cronológico
-        deOutrosCarnes.sort((a, b) => {
+          if (numParcelaAtual > 0 && na > 0 && nb > 0) {
+            const aPost = na > numParcelaAtual;
+            const bPost = nb > numParcelaAtual;
+            if (aPost !== bPost) return aPost ? -1 : 1;
+            return na - nb;
+          }
           const da = a.vencimento ? new Date(a.vencimento).getTime() : 0;
           const db = b.vencimento ? new Date(b.vencimento).getTime() : 0;
           return da - db;
         });
 
-        listaOrdenada = [...doMesmoCarnê, ...deOutrosCarnes];
-
-        if (doMesmoCarnê.length > 0) {
-          setSelecionadas(new Set(doMesmoCarnê.map(r => r.id)));
-          const somaTotal = row.divida_total + doMesmoCarnê.reduce((acc, r) => acc + r.divida_total, 0);
-          setValorTotalCompra(somaTotal);
-          setTotalParcelasCarnê(totalCarnêAtual);
-        } else {
-          setSelecionadas(new Set(listaOrdenada.map(r => r.id)));
-        }
+        setOutras(outrasDestaCompra);
+        setSelecionadas(new Set(outrasDestaCompra.map(r => r.id)));
       } else {
-        setSelecionadas(new Set(lista.map(r => r.id)));
+        setOutras([]);
+        setSelecionadas(new Set());
       }
-
-      setOutras(listaOrdenada);
     }
 
     carregar();
@@ -1412,7 +1391,7 @@ export function BaixaDialog({
     if (!ok) return setErr("Informe um valor monetário válido.");
     if (V <= 0) return setErr("O valor pago deve ser maior que zero.");
     if (V > saldoTotalGrupo) {
-      return setErr(`O valor informado (${money(V)}) não pode ser maior que o saldo total (${money(saldoTotalGrupo)}).`);
+      return setErr(`O valor informado (${money(V)}) não pode ser maior que o saldo total desta compra (${money(saldoTotalGrupo)}).`);
     }
 
     setBusy(true);
@@ -1792,6 +1771,12 @@ export function BaixaDialog({
             <span>Vencimento: <b>{dt(row.vencimento)}</b></span>
             <span>Saldo em aberto: <b className="mono">{money(row.saldo_devedor)}</b></span>
           </div>
+          {outras.length > 0 && (
+            <div style={{ marginTop: 8, fontSize: 11.5, color: "#15803d", display: "flex", alignItems: "center", gap: 5 }}>
+              <span>🔒</span>
+              <span>Abatimento e recálculo vinculados <b>exclusivamente a esta compra</b> ({outras.length} {outras.length === 1 ? "parcela restante" : "parcelas restantes"}). Demais compras em aberto não são afetadas.</span>
+            </div>
+          )}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 6 }}>
