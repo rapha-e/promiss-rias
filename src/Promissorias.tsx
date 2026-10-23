@@ -1656,14 +1656,18 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                             borderRadius: 99,
                             background: "#fef3c7",
                             color: "#b45309",
-                            border: "1px solid #fde68a",
+                            border: "1.5px solid #f59e0b",
                             whiteSpace: "nowrap",
                             cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                            boxShadow: "0 1px 2px rgba(245, 158, 11, 0.15)",
                           }}
                           onClick={() => setFichaCliente({ cliente: cli.cliente_nome, telefone: cli.telefone })}
-                          title={`Este cliente possui ${cli.qtdComprasAbertas} compras/parcelamentos em aberto. Clique no nome para ver cada compra separadamente.`}
+                          title={`Atenção: Este cliente possui ${cli.qtdComprasAbertas} compras/parcelamentos em aberto. Clique no cliente para ver cada compra separada.`}
                         >
-                          🏷️ +{cli.qtdComprasAbertas - 1} compra{cli.qtdComprasAbertas > 2 ? "s" : ""} ativa{cli.qtdComprasAbertas > 2 ? "s" : ""}
+                          ⚠️ {cli.qtdComprasAbertas} compras em aberto
                         </span>
                       )}
                     </div>

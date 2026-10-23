@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import { dt, hoje, diffDias, mensagemCobranca, money, normalizarTelefones, identificarCompraAtual } from "./lib";
 import type { Row } from "./lib";
-import { Editor, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
+import { Editor, FichaCliente, Painel, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog } from "./Dialogs";
 import { SortIcon } from "./SortIcon";
 
 type Cli = {
@@ -432,7 +432,7 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
         <button className="btn ghost" disabled={page === 0} onClick={() => setPage(page - 1)}>←</button>
         <button className="btn ghost" disabled={page >= pages - 1} onClick={() => setPage(page + 1)}>→</button>
       </div>
-      {sel && <Ficha c={sel} isAdmin={isAdmin} onClose={() => setSel(null)} onChanged={load} />}
+      {sel && <FichaCliente cliente={sel.cliente} telefone={sel.telefone} isAdmin={isAdmin} onClose={() => setSel(null)} onChanged={load} />}
       {whats && <CobrancaCliente c={whats} onClose={() => setWhats(null)} />}
     </>
   );

@@ -321,7 +321,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       setBusy(false);
       if (error) return setErr("Não foi possível salvar: " + error.message);
     } else {
-      // Criação de novas promissórias com divisão automática
+      // Criação de novas promissórias com divisão automática como uma nova compra independente
+      const loteId = `COMPRA_${Date.now()}`;
       const payload = parcelasCalculadas.map(item => ({
         cliente_nome: n.trim(),
         telefone: p.trim(),
@@ -329,6 +330,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         parcelas: item.parcela,
         valor_pago: item.pago,
         vencimento: item.vencimento,
+        origem: `SISTEMA WEB (${loteId})`,
       }));
       const { error } = await supabase.from("promissorias").insert(payload);
       setBusy(false);
