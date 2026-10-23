@@ -392,11 +392,15 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
     const f61a90 = abertas.filter(r => r.dias_atraso >= 61 && r.dias_atraso <= 90);
     const val61a90 = f61a90.reduce((s, r) => s + r.saldo_devedor, 0);
 
-    // 6. Mais de 90 dias (+90d)
-    const fMais90 = abertas.filter(r => r.dias_atraso > 90);
-    const valMais90 = fMais90.reduce((s, r) => s + r.saldo_devedor, 0);
+    // 6. 90 a 180 dias
+    const f90a180 = abertas.filter(r => r.dias_atraso >= 91 && r.dias_atraso <= 180);
+    const val90a180 = f90a180.reduce((s, r) => s + r.saldo_devedor, 0);
 
-    // 7. Fundo Perdido
+    // 7. Acima de 180 dias (+180d)
+    const fMais180 = abertas.filter(r => r.dias_atraso > 180);
+    const valMais180 = fMais180.reduce((s, r) => s + r.saldo_devedor, 0);
+
+    // 8. Fundo Perdido
     const valPerdido = perdidas.reduce((s, r) => s + r.saldo_devedor, 0);
 
     return [
@@ -466,17 +470,30 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         estrategiaSugerida: "Negociação firme. Desconto pontual para quitação ou renegociação com garantia.",
       },
       {
-        id: "mais_90",
-        titulo: "Mais de 90 dias",
-        subtitulo: "Crítico / Alta inadimplência",
-        diasLabel: "+90 dias",
-        cor: "#991b1b",
-        bgCor: "rgba(153, 27, 27, 0.1)",
+        id: "90_180",
+        titulo: "90 a 180 dias",
+        subtitulo: "Atraso severo / Renegociação",
+        diasLabel: "90–180 dias",
+        cor: "#b91c1c",
+        bgCor: "rgba(185, 28, 28, 0.08)",
         nivelRisco: "critico",
-        qtd: fMais90.length,
-        valor: valMais90,
-        porcentagemDoVencido: (valMais90 / totalVenc) * 100,
-        estrategiaSugerida: "Feirão de quitação: desconto agressivo à vista (30% a 50%) via PIX imediato.",
+        qtd: f90a180.length,
+        valor: val90a180,
+        porcentagemDoVencido: (val90a180 / totalVenc) * 100,
+        estrategiaSugerida: "Proposta agressiva de repactuação com entrada facilitada ou desconto de 30% à vista.",
+      },
+      {
+        id: "mais_180",
+        titulo: "Acima de 180 dias",
+        subtitulo: "Crítico / Alta inadimplência",
+        diasLabel: "+180 dias",
+        cor: "#7f1d1d",
+        bgCor: "rgba(127, 29, 29, 0.1)",
+        nivelRisco: "critico",
+        qtd: fMais180.length,
+        valor: valMais180,
+        porcentagemDoVencido: (valMais180 / totalVenc) * 100,
+        estrategiaSugerida: "Feirão de quitação: desconto agressivo à vista (40% a 50%) via PIX imediato.",
       },
       {
         id: "perdido",
