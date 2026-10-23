@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import {
   dt, getDDD, linkWhatsApp, money, normalizarTelefones, parse, setDDD, titulo, toBRL,
-  gerarPayloadPix, calcularScoreCliente, salvarPromessaPagamento, PIX_CHAVE_OFICIAL,
+  gerarPayloadPix, calcularScoreCliente, PIX_CHAVE_OFICIAL,
   formatarMascaraMoeda, desmascararMoeda,
 } from "./lib";
 import type { Row } from "./lib";
@@ -85,10 +85,6 @@ export default function RenegociacaoCobranca({
 
   // Modais adicionais
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
-  const [modalPromessa, setModalPromessa] = useState(false);
-  const [promessaData, setPromessaData] = useState(somaDiasStr(getHojeISO(), 3));
-  const [promessaValor, setPromessaValor] = useState<string>("");
-  const [promessaObs, setPromessaObs] = useState("");
   const [modalRepactuacao, setModalRepactuacao] = useState(false);
   const [repactuando, setRepactuando] = useState(false);
   const [primeiroVencRepactuacao, setPrimeiroVencRepactuacao] = useState(somaDiasStr(getHojeISO(), 30));
@@ -1070,18 +1066,6 @@ export default function RenegociacaoCobranca({
                 <span>💬</span> Enviar no WhatsApp & Próximo →
               </button>
 
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => {
-                  setPromessaValor(formatarMascaraMoeda(simulacao.saldoTotal));
-                  setModalPromessa(true);
-                }}
-                style={{ padding: "12px 14px", display: "inline-flex", alignItems: "center", gap: 6 }}
-                title="Agendar promessa de pagamento para follow-up"
-              >
-                <span>📅</span> Agendar Promessa
-              </button>
 
               <button
                 type="button"
@@ -1111,79 +1095,6 @@ export default function RenegociacaoCobranca({
         )}
       </div>
 
-      {/* Modal Agendar Promessa */}
-      {modalPromessa && clienteAtual && (
-        <div className="ov" onClick={() => setModalPromessa(false)}>
-          <div className="panel" onClick={e => e.stopPropagation()} style={{ width: "min(460px, 94vw)", height: "auto", margin: "auto", borderRadius: 14, padding: 20 }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: 18 }}>📅 Agendar Promessa de Pagamento</h2>
-            <div className="sub" style={{ marginBottom: 16 }}>
-              Anotar compromisso de pagamento para acompanhamento na data certa.
-            </div>
-
-            <div style={{ display: "grid", gap: 12 }}>
-              <div>
-                <b>Cliente:</b> {clienteAtual.cliente}
-              </div>
-              <label>
-                Data prometida:
-                <input
-                  type="date"
-                  value={promessaData}
-                  onChange={e => setPromessaData(e.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Valor prometido (R$):
-                <input
-                  type="text"
-                  value={promessaValor}
-                  onChange={e => setPromessaValor(formatarMascaraMoeda(e.target.value, true))}
-                  inputMode="numeric"
-                  placeholder={formatarMascaraMoeda(clienteAtual.valorTotal)}
-                />
-              </label>
-              <label>
-                Observação (Ex: Salário dia do vale, pagar no PIX):
-                <input
-                  type="text"
-                  value={promessaObs}
-                  onChange={e => setPromessaObs(e.target.value)}
-                  placeholder="Ex: Vai pagar pelo PIX após as 14h"
-                />
-              </label>
-              <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                <button
-                  type="button"
-                  className="btn"
-                  onClick={() => {
-                    salvarPromessaPagamento({
-                      cliente: clienteAtual.cliente,
-                      telefone: clienteAtual.telefoneOriginal,
-                      dataPromessa: promessaData,
-                      valor: desmascararMoeda(promessaValor) || clienteAtual.valorTotal,
-                      observacao: promessaObs,
-                    });
-                    alert(`📅 Promessa de pagamento registrada para ${dt(promessaData)}! Ela aparecerá no Dashboard na data marcada.`);
-                    setModalPromessa(false);
-                    setPromessaObs("");
-                  }}
-                  style={{ flex: 1 }}
-                >
-                  Salvar Promessa
-                </button>
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={() => setModalPromessa(false)}
-                >
-                  Cancelar
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Modal Formalizar Acordo no Sistema */}
       {modalRepactuacao && clienteAtual && (

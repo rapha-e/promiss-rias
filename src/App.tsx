@@ -5,6 +5,7 @@ import { configured, supabase } from "./supabase";
 import Promissorias from "./Promissorias";
 import Clientes from "./Clientes";
 import RenegociacaoCobranca from "./RenegociacaoCobranca";
+import PromessasPagamento from "./PromessasPagamento";
 import Dashboard from "./Dashboard";
 import logo from "./logo.png";
 
@@ -49,6 +50,7 @@ const TABS = [
   ["promissorias", "Promissórias"],
   ["clientes", "Clientes"],
   ["renegociacao", "Renegociação & Cobrança"],
+  ["promessas", "Agendar Promessa"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -77,6 +79,7 @@ function Shell({ session }: { session: Session }) {
         {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
         {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
         {tab === "renegociacao" && <RenegociacaoCobranca />}
+        {tab === "promessas" && <PromessasPagamento />}
       </main>
     </>
   );
