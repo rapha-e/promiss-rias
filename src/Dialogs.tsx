@@ -5,7 +5,7 @@ import {
   LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
-  gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses,
+  gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses, ajustarApenasDia,
   identificarCompraAtual, separarComprasCliente,
   formatarMascaraMoeda, desmascararMoeda,
 } from "./lib";
@@ -52,20 +52,52 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [i, setI] = useState(row?.parcelas ?? "1X");
   const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
   const [atualizarProximas, setAtualizarProximas] = useState(false);
+  const [parcelasCarne, setParcelasCarne] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
 
-  // Informações sobre parcelamento de carnê (ex: 2/6, 3/10) para suporte a replicação de data-base
+  // Informações sobre parcelamento de carnê (ex: 2/6, 3/10) para suporte a ajuste de dia em todo o carnê
   const infoCarne = useMemo(() => {
     if (!row || !row.parcelas) return null;
     const m = (row.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
     if (!m) return null;
     const num = parseInt(m[1], 10);
     const denom = parseInt(m[2], 10);
-    if (num >= denom) return null; // Já é a última parcela do carnê
-    return { num, denom, totalFuturas: denom - num };
+    if (denom <= 1) return null;
+    return { num, denom, totalParcelas: denom };
   }, [row]);
+
+  // Carrega todas as parcelas deste carnê para prévia e atualização em lote (inclusive anteriores e quitadas)
+  useEffect(() => {
+    if (!row || !infoCarne || !n.trim()) {
+      setParcelasCarne([]);
+      return;
+    }
+    let cancelado = false;
+    supabase
+      .from("promissorias")
+      .select("id, cliente_nome, parcelas, vencimento, saldo_devedor, divida_total, valor_pago")
+      .ilike("cliente_nome", n.trim())
+      .then(({ data }) => {
+        if (cancelado || !data) return;
+        const doCarne = data.filter(p => {
+          const m = (p.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
+          return (
+            m &&
+            parseInt(m[2], 10) === infoCarne.denom &&
+            Math.abs(p.divida_total - (row.divida_total || 0)) <= Math.max(infoCarne.denom, 200)
+          );
+        });
+        doCarne.sort((a, b) => {
+          const na = parseInt((a.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+          const nb = parseInt((b.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10);
+          return na - nb;
+        });
+        setParcelasCarne(doCarne);
+      });
+    return () => { cancelado = true; };
+  }, [row, infoCarne, n]);
 
   // Estados do Auto Preenchimento Inteligente ao digitar (Autocomplete)
   const [sugestoes, setSugestoes] = useState<{
@@ -336,28 +368,32 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         return setErr("Não foi possível salvar: " + error.message);
       }
 
-      // Repercutir nova data-base nas próximas parcelas do carnê se solicitado
+      // Repercutir novo dia de vencimento em todas as parcelas do carnê (inclusive quitadas), mantendo meses e anos inalterados
       if (atualizarProximas && infoCarne && d) {
         try {
-          const { data: todasDoCliente } = await supabase
-            .from("promissorias")
-            .select("id, parcelas, vencimento, saldo_devedor, divida_total, origem")
-            .ilike("cliente_nome", n.trim());
+          const novoDia = parseInt(d.slice(8, 10), 10);
+          if (novoDia >= 1 && novoDia <= 31) {
+            let listaAlvo = parcelasCarne;
+            if (!listaAlvo || listaAlvo.length === 0) {
+              const { data: todasDoCliente } = await supabase
+                .from("promissorias")
+                .select("id, parcelas, vencimento, saldo_devedor, divida_total, valor_pago, origem")
+                .ilike("cliente_nome", n.trim());
+              listaAlvo = todasDoCliente || [];
+            }
 
-          if (todasDoCliente && todasDoCliente.length > 0) {
-            for (const pRow of todasDoCliente) {
-              if (pRow.id === row.id) continue;
+            for (const pRow of listaAlvo) {
+              if (pRow.id === row.id) continue; // Parcela atual já foi salva acima
               const mP = (pRow.parcelas || "").trim().match(/^(\d+)\/(\d+)$/);
               if (!mP) continue;
-              const numP = parseInt(mP[1], 10);
               const denomP = parseInt(mP[2], 10);
 
-              // Pertence ao mesmo carnê (mesmo denominador) e é uma parcela posterior
-              if (denomP === infoCarne.denom && numP > infoCarne.num) {
+              // Pertence ao mesmo carnê (mesmo denominador e valor compatível)
+              if (denomP === infoCarne.denom) {
                 const diffValor = Math.abs(pRow.divida_total - T);
-                if (diffValor <= Math.max(denomP, 200)) {
-                  const offsetMeses = numP - infoCarne.num;
-                  const novoVenc = somaMeses(d, offsetMeses);
+                if (diffValor <= Math.max(denomP, 200) && pRow.vencimento) {
+                  // Mantém o mês e ano da parcela e altera somente o dia
+                  const novoVenc = ajustarApenasDia(pRow.vencimento, novoDia);
 
                   if (novoVenc && novoVenc !== pRow.vencimento) {
                     let logsArray: any[] = [];
@@ -369,8 +405,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                     }
                     logsArray.push({
                       data: new Date().toISOString(),
-                      operador: "alinhamento_automatico_carne",
-                      detalhes: `Vencimento alinhado com a parcela ${row.parcelas}: ajustado de ${pRow.vencimento} para ${novoVenc} (todo dia ${d.slice(8, 10)}).`,
+                      operador: "alinhamento_dia_carne",
+                      detalhes: `Dia de vencimento alinhado: alterado de ${pRow.vencimento} para ${novoVenc} (mantendo o mês/ano original e fixando o dia ${novoDia}).`,
                     });
 
                     await supabase
@@ -386,7 +422,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             }
           }
         } catch (e: any) {
-          console.warn("Aviso ao repercutir vencimento nas próximas parcelas:", e);
+          console.warn("Aviso ao repercutir novo dia nas parcelas do carnê:", e);
         }
       }
 
@@ -801,36 +837,43 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                   />
                   <div>
                     <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>
-                      🗓️ Repercutir nova data-base (todo dia {d.slice(8, 10)}) nas próximas parcelas deste carnê
+                      🗓️ Repercutir novo dia de vencimento (dia {d.slice(8, 10)}) em todas as parcelas deste carnê
                     </div>
                     <div className="sub" style={{ fontSize: 11.5, marginTop: 2 }}>
-                      Alinha automaticamente os vencimentos das parcelas seguintes em aberto ({infoCarne.num + 1}/{infoCarne.denom} até {infoCarne.denom}/{infoCarne.denom}) para vencerem no mesmo dia nos meses seguintes.
+                      Altera somente o dia para <b>{d.slice(8, 10)}</b> em todas as parcelas (inclusive já quitadas), mantendo os meses e anos já cadastrados sem alteração.
                     </div>
                   </div>
                 </label>
 
                 {atualizarProximas && (
                   <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px dashed var(--line)", fontSize: 11.5 }}>
-                    <span style={{ fontWeight: 600, color: "var(--brand)" }}>Prévia dos novos vencimentos:</span>
+                    <span style={{ fontWeight: 600, color: "var(--brand)" }}>
+                      Prévia das parcelas mantendo os meses cadastrados (com vencimento no dia {d.slice(8, 10)}):
+                    </span>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 6 }}>
-                      {Array.from({ length: Math.min(infoCarne.totalFuturas, 8) }, (_, k) => {
-                        const numProx = infoCarne.num + k + 1;
-                        const vencProx = somaMeses(d, k + 1);
+                      {(parcelasCarne.length > 0 ? parcelasCarne : [row]).map(pItem => {
+                        const vencBase = pItem.id === row.id ? d : pItem.vencimento;
+                        const novoVenc = ajustarApenasDia(vencBase, parseInt(d.slice(8, 10), 10));
+                        const quitada = (pItem.saldo_devedor ?? 0) <= 0;
                         return (
                           <span
-                            key={numProx}
+                            key={pItem.id}
                             className="pill"
-                            style={{ fontSize: 11, background: "var(--card)", borderColor: "var(--line)" }}
+                            style={{
+                              fontSize: 11,
+                              background: pItem.id === row.id
+                                ? "rgba(15, 118, 110, 0.15)"
+                                : quitada
+                                ? "rgba(21, 128, 61, 0.1)"
+                                : "var(--card)",
+                              borderColor: pItem.id === row.id ? "var(--brand)" : "var(--line)",
+                              color: quitada ? "#15803d" : "inherit",
+                            }}
                           >
-                            <b>{numProx}/{infoCarne.denom}</b>: {dt(vencProx)}
+                            <b>{pItem.parcelas}</b>: {dt(novoVenc)} {quitada ? "✓ (Quitada)" : ""} {pItem.id === row.id ? "★ (Atual)" : ""}
                           </span>
                         );
                       })}
-                      {infoCarne.totalFuturas > 8 && (
-                        <span className="sub" style={{ alignSelf: "center" }}>
-                          +{infoCarne.totalFuturas - 8} parcelas...
-                        </span>
-                      )}
                     </div>
                   </div>
                 )}

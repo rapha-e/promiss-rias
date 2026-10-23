@@ -138,6 +138,23 @@ export const somaMeses = (dataIso: string | null | undefined, meses: number): st
   return `${targetAno}-${mm}-${dd}`;
 };
 
+/**
+ * Substitui apenas o dia de uma data ISO (YYYY-MM-DD), mantendo o ano e o mês originais.
+ * Respeita o limite de dias do mês (ex: dia 31 em fevereiro vira 28/29, em abril vira 30).
+ */
+export const ajustarApenasDia = (dataIso: string | null | undefined, novoDia: number): string | null => {
+  if (!dataIso) return null;
+  const [ano, mes] = dataIso.split("-").map(Number);
+  if (!ano || !mes) return dataIso;
+
+  const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const targetDia = Math.min(Math.max(novoDia, 1), ultimoDia);
+
+  const mm = String(mes).padStart(2, "0");
+  const dd = String(targetDia).padStart(2, "0");
+  return `${ano}-${mm}-${dd}`;
+};
+
 export function obterVencimentoEfetivo(r: {
   parcelas?: string | null;
   divida_total?: number;
