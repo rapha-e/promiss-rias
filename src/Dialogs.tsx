@@ -1773,8 +1773,8 @@ export function BaixaDialog({
             <span className="sub">
               {isDiferente
                 ? V > row.saldo_devedor
-                  ? `R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} maior que o saldo.`
-                  : `R$ ${(Math.abs(V - row.saldo_devedor) / 100).toFixed(2)} menor que o saldo.`
+                  ? `${money(V - row.saldo_devedor)} maior que o saldo.`
+                  : `${money(row.saldo_devedor - V)} menor que o saldo.`
                 : "Valor exato do saldo da parcela."}
             </span>
           </label>
