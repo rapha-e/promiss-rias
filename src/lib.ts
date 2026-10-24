@@ -282,7 +282,7 @@ export function normalizarTelefones(texto: string, ddd = getDDD()): string[] {
   return out;
 }
 export const formatarTelefone = (n: string) => `+${n.slice(0, 2)} (${n.slice(2, 4)}) ${n.slice(4, n.length - 4)}-${n.slice(-4)}`;
-export const linkWhatsApp = (numero: string, msg: string) => `https://wa.me/${numero}?text=${encodeURIComponent(msg)}`;
+export const linkWhatsApp = (numero: string, msg: string) => `https://api.whatsapp.com/send?phone=${numero}&text=${encodeURIComponent(msg)}`;
 
 export const titulo = (s: string) => s.toLocaleLowerCase("pt-BR").replace(/(^|\s)\S/g, c => c.toLocaleUpperCase("pt-BR"));
 
