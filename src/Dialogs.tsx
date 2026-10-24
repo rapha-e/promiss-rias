@@ -73,6 +73,20 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [busy, setBusy] = useState(false);
   const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
 
+  // Modo de edição: "parcela" para ajustes pontuais na parcela individual, ou "compra_total" para unificar/reparcelar
+  const [modoEdicao, setModoEdicao] = useState<"parcela" | "compra_total">("parcela");
+
+  // Estados para Unificação / Reparcelamento da Dívida Total
+  const [todasPromissoriasCliente, setTodasPromissoriasCliente] = useState<Row[]>([]);
+  const [carregandoTitulosCliente, setCarregandoTitulosCliente] = useState(false);
+  const [escopoUnificacao, setEscopoUnificacao] = useState<"carne" | "todas_abertas">("carne");
+  const [idsParcelasSelecionadas, setIdsParcelasSelecionadas] = useState<number[]>([]);
+  const [novaCompra, setNovaCompra] = useState<string>("");
+  const [entradaUnificacao, setEntradaUnificacao] = useState<string>("");
+  const [qtdParcelasUnificacao, setQtdParcelasUnificacao] = useState<number>(4);
+  const [vencimentoUnificacao, setVencimentoUnificacao] = useState<string>(somaDias(hoje(), 30));
+  const [obsUnificacao, setObsUnificacao] = useState<string>("");
+
   // Informações sobre parcelamento de carnê (ex: 2/6, 3/10) para suporte a ajuste de dia em todo o carnê
   const infoCarne = useMemo(() => {
     if (!row || !row.parcelas) return null;
@@ -83,6 +97,117 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     if (denom <= 1) return null;
     return { num, denom, totalParcelas: denom };
   }, [row]);
+
+  // Carrega todas as promissórias do cliente do Supabase para ter visão total das compras e parcelas
+  useEffect(() => {
+    if (!row || !n.trim()) return;
+    setCarregandoTitulosCliente(true);
+    let cancelado = false;
+    supabase
+      .from("promissorias")
+      .select("*")
+      .ilike("cliente_nome", n.trim())
+      .order("vencimento", { ascending: true })
+      .then(({ data }) => {
+        if (cancelado) return;
+        setCarregandoTitulosCliente(false);
+        if (data) {
+          setTodasPromissoriasCliente(data as Row[]);
+        }
+      });
+    return () => { cancelado = true; };
+  }, [row, n]);
+
+  // Agrupa as compras do cliente
+  const comprasCliente = useMemo(() => {
+    if (!todasPromissoriasCliente || todasPromissoriasCliente.length === 0) return [];
+    return separarComprasCliente(todasPromissoriasCliente);
+  }, [todasPromissoriasCliente]);
+
+  // Identifica a qual compra a parcela atual (row) pertence
+  const compraDoRow = useMemo(() => {
+    if (!row || comprasCliente.length === 0) return null;
+    return comprasCliente.find(c => c.promissorias.some(p => p.id === row.id)) || null;
+  }, [row, comprasCliente]);
+
+  // Parcelas em aberto da compra do row
+  const parcelasAbertasDestaCompra = useMemo(() => {
+    if (!compraDoRow) {
+      return parcelasCarne.filter(p => (p.saldo_devedor ?? 0) > 0 && !p.fundo_perdido);
+    }
+    return compraDoRow.promissorias.filter(p => (p.saldo_devedor ?? 0) > 0 && !p.fundo_perdido);
+  }, [compraDoRow, parcelasCarne]);
+
+  // Todas as parcelas em aberto do cliente em todas as compras
+  const todasParcelasAbertasCliente = useMemo(() => {
+    return todasPromissoriasCliente.filter(p => (p.saldo_devedor ?? 0) > 0 && !p.fundo_perdido);
+  }, [todasPromissoriasCliente]);
+
+  // Inicializa parcelas selecionadas para unificação conforme o escopo escolhido
+  useEffect(() => {
+    if (!row) return;
+    if (escopoUnificacao === "carne") {
+      if (parcelasAbertasDestaCompra.length > 0) {
+        setIdsParcelasSelecionadas(parcelasAbertasDestaCompra.map(p => p.id));
+      } else {
+        setIdsParcelasSelecionadas([row.id]);
+      }
+    } else {
+      if (todasParcelasAbertasCliente.length > 0) {
+        setIdsParcelasSelecionadas(todasParcelasAbertasCliente.map(p => p.id));
+      } else {
+        setIdsParcelasSelecionadas([row.id]);
+      }
+    }
+  }, [escopoUnificacao, parcelasAbertasDestaCompra, todasParcelasAbertasCliente, row]);
+
+  // Inicializa quantidade de parcelas e vencimento sugerido para a unificação
+  useEffect(() => {
+    if (compraDoRow) {
+      if (compraDoRow.totalParcelas && compraDoRow.totalParcelas > 1) {
+        setQtdParcelasUnificacao(compraDoRow.totalParcelas);
+      }
+      if (compraDoRow.proximoVencimento) {
+        setVencimentoUnificacao(compraDoRow.proximoVencimento);
+      }
+    }
+  }, [compraDoRow]);
+
+  // Cálculos matemáticos da unificação
+  const parcelasParaUnificar = useMemo(() => {
+    return todasPromissoriasCliente.filter(p =>
+      idsParcelasSelecionadas.includes(p.id) && (p.saldo_devedor ?? 0) > 0 && !p.fundo_perdido
+    );
+  }, [todasPromissoriasCliente, idsParcelasSelecionadas]);
+
+  const saldoAnteriorDevedor = useMemo(() => {
+    return parcelasParaUnificar.reduce((acc, p) => acc + (p.saldo_devedor ?? 0), 0);
+  }, [parcelasParaUnificar]);
+
+  const valorNovaCompraNum = parse(novaCompra) || 0;
+  const valorEntradaUnificacaoNum = parse(entradaUnificacao) || 0;
+
+  const saldoFinalAParcelar = Math.max(0, saldoAnteriorDevedor + valorNovaCompraNum - valorEntradaUnificacaoNum);
+
+  // Divisão das novas parcelas da unificação (centavo a centavo)
+  const parcelasUnificadasCalculadas = useMemo(() => {
+    if (saldoFinalAParcelar <= 0 || qtdParcelasUnificacao <= 0 || !vencimentoUnificacao) return [];
+    const base = Math.floor(saldoFinalAParcelar / qtdParcelasUnificacao);
+    const resto = saldoFinalAParcelar % qtdParcelasUnificacao;
+
+    return Array.from({ length: qtdParcelasUnificacao }, (_, idx) => {
+      const num = idx + 1;
+      const valor = base + (idx === 0 ? resto : 0);
+      const venc = somaMeses(vencimentoUnificacao, idx);
+      const rotulo = qtdParcelasUnificacao === 1 ? "1X" : `${num}/${qtdParcelasUnificacao}`;
+      return {
+        numero: num,
+        parcela: rotulo,
+        valor,
+        vencimento: venc,
+      };
+    });
+  }, [saldoFinalAParcelar, qtdParcelasUnificacao, vencimentoUnificacao]);
 
   // Carrega todas as parcelas deste carnê para prévia e atualização em lote (inclusive anteriores e quitadas)
   useEffect(() => {
@@ -357,8 +482,163 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     onSaved();
   }
 
+  async function submitUnificacao() {
+    if (parcelasParaUnificar.length === 0 && valorNovaCompraNum <= 0) {
+      setErr("Selecione ao menos uma parcela em aberto ou informe o valor de uma nova compra.");
+      return;
+    }
+    if (saldoFinalAParcelar <= 0) {
+      setErr("O saldo final a parcelar deve ser maior que zero (a entrada não pode cobrir todo o valor).");
+      return;
+    }
+    if (!vencimentoUnificacao) {
+      setErr("Informe a data do 1º vencimento.");
+      return;
+    }
+
+    const confirmou = window.confirm(
+      `Confirmar unificação e novo parcelamento para ${n.trim()}?\n\n` +
+      `• Saldo em aberto anterior: ${money(saldoAnteriorDevedor)} (${parcelasParaUnificar.length} parcela(s) selecionada(s))\n` +
+      (valorNovaCompraNum > 0 ? `• Nova compra adicionada: + ${money(valorNovaCompraNum)}\n` : "") +
+      (valorEntradaUnificacaoNum > 0 ? `• Entrada recebida no ato: - ${money(valorEntradaUnificacaoNum)}\n` : "") +
+      `• Novo saldo a parcelar: ${money(saldoFinalAParcelar)} em ${qtdParcelasUnificacao}x de aprox. ${money(Math.round(saldoFinalAParcelar / qtdParcelasUnificacao))}\n` +
+      `• 1º vencimento: ${dt(vencimentoUnificacao)}\n\n` +
+      `As parcelas anteriores selecionadas serão baixadas e ${qtdParcelasUnificacao} novas parcelas serão geradas com registro no histórico.`
+    );
+    if (!confirmou) return;
+
+    setBusy(true);
+    setErr("");
+
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      const operadorEmail = userData?.user?.email || "sistema@leooticas.com";
+      const operadorId = userData?.user?.id || null;
+      const agoraIso = new Date().toISOString();
+      const titulosAntigosIds = parcelasParaUnificar.map(pRow => pRow.id);
+      const detalhesAcordo = `Unificação e reparcelamento em ${qtdParcelasUnificacao}x realizado em ${new Date().toLocaleDateString("pt-BR")}. Saldo devedor anterior: ${money(saldoAnteriorDevedor)}, nova compra: ${money(valorNovaCompraNum)}, entrada: ${money(valorEntradaUnificacaoNum)}, novo total: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`;
+
+      // 1. Baixar as parcelas antigas selecionadas
+      for (const pRow of parcelasParaUnificar) {
+        let logsArray: any[] = [];
+        if (pRow.origem) {
+          try {
+            const parsed = JSON.parse(pRow.origem);
+            if (Array.isArray(parsed)) logsArray = parsed;
+          } catch (_) {}
+        }
+        logsArray.push({
+          data: agoraIso,
+          valor: 0,
+          saldoRepactuado: pRow.saldo_devedor,
+          operador: operadorEmail,
+          detalhes: detalhesAcordo,
+          acordo: {
+            tipo: "REPACTUACAO_BAIXA",
+            parcelasQtd: qtdParcelasUnificacao,
+            saldoTotalAnterior: saldoAnteriorDevedor,
+            novaCompra: valorNovaCompraNum,
+            entrada: valorEntradaUnificacaoNum,
+            novoSaldo: saldoFinalAParcelar,
+            primeiroVencimento: vencimentoUnificacao,
+            titulosEnvolvidos: titulosAntigosIds,
+            observacoes: obsUnificacao.trim() || undefined,
+          },
+        });
+
+        const { error: errUpd } = await supabase
+          .from("promissorias")
+          .update({
+            valor_pago: pRow.divida_total,
+            origem: JSON.stringify(logsArray),
+          })
+          .eq("id", pRow.id);
+
+        if (errUpd) throw new Error(`Erro ao baixar parcela #${pRow.id}: ${errUpd.message}`);
+
+        try {
+          await supabase.from("promissoria_pagamentos").insert({
+            promissoria_id: pRow.id,
+            valor_pago: pRow.saldo_devedor,
+            operador_email: operadorEmail,
+            operador_id: operadorId,
+            data_pagamento: agoraIso,
+            detalhes: detalhesAcordo,
+          });
+        } catch (_) {}
+      }
+
+      // 2. Gerar as novas promissórias
+      const loteId = `UNIF_${Date.now()}`;
+      const novasPayload = parcelasUnificadasCalculadas.map(item => ({
+        cliente_nome: n.trim(),
+        telefone: p.trim(),
+        divida_total: item.valor,
+        valor_pago: 0,
+        vencimento: item.vencimento,
+        parcelas: item.parcela,
+        origem: JSON.stringify([
+          {
+            data: agoraIso,
+            valor: 0,
+            operador: operadorEmail,
+            detalhes: `Promissória gerada por unificação/reparcelamento (${item.parcela}). ${detalhesAcordo}`,
+            acordo: {
+              tipo: "NOVA_PARCELA_REPACTUADA",
+              loteId,
+              numeroParcela: item.numero,
+              totalParcelas: qtdParcelasUnificacao,
+              saldoTotalAnterior: saldoAnteriorDevedor,
+              novaCompra: valorNovaCompraNum,
+              entrada: valorEntradaUnificacaoNum,
+              titulosOriginais: titulosAntigosIds,
+              observacoes: obsUnificacao.trim() || undefined,
+            },
+          },
+        ]),
+        fundo_perdido: false,
+      }));
+
+      const { data: novasGravadas, error: errIns } = await supabase
+        .from("promissorias")
+        .insert(novasPayload)
+        .select("id");
+
+      if (errIns) throw new Error("Erro ao criar novas promissórias: " + errIns.message);
+
+      // 3. Registrar entrada no caixa / promissoria_pagamentos se houver
+      if (valorEntradaUnificacaoNum > 0 && novasGravadas && novasGravadas.length > 0) {
+        try {
+          await supabase.from("promissoria_pagamentos").insert({
+            promissoria_id: novasGravadas[0].id,
+            valor_pago: valorEntradaUnificacaoNum,
+            operador_email: operadorEmail,
+            operador_id: operadorId,
+            data_pagamento: agoraIso,
+            detalhes: `Sinal de Entrada (${money(valorEntradaUnificacaoNum)}) recebido no ato da unificação/reparcelamento em ${qtdParcelasUnificacao}x.`,
+          });
+        } catch (_) {}
+      }
+
+      setBusy(false);
+      alert(
+        `✅ Unificação e novo parcelamento realizados com sucesso!\n\n` +
+        `• ${parcelasParaUnificar.length} parcela(s) antiga(s) quitada(s) por novação de dívida.\n` +
+        `• ${qtdParcelasUnificacao} nova(s) parcela(s) gerada(s).\n` +
+        `• Novo saldo total a receber: ${money(saldoFinalAParcelar)}.`
+      );
+      onSaved();
+    } catch (err: any) {
+      setBusy(false);
+      setErr(err.message || "Erro desconhecido ao unificar parcelamento.");
+    }
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (row && modoEdicao === "compra_total") {
+      return submitUnificacao();
+    }
     if (n.trim().length < 2) return setErr("Informe o nome do cliente.");
     if (!ok) return setErr("Valores devem ser monetários e não negativos.");
     if (isNova && G >= T) return setErr("O valor da entrada não pode ser igual ou maior que o valor total da dívida.");
@@ -466,9 +746,15 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   }
 
   return (
-    <Painel onClose={onClose}>
+    <Painel onClose={onClose} wide={!isNova && modoEdicao === "compra_total"}>
       <form onSubmit={submit} autoComplete="off">
-        <h2 style={{ margin: 0 }}>{row ? "Editar promissória" : "Nova promissória"}</h2>
+        <h2 style={{ margin: 0 }}>
+          {row
+            ? modoEdicao === "compra_total"
+              ? "Unificar / Reparcelar Dívida Total"
+              : "Editar promissória"
+            : "Nova promissória"}
+        </h2>
         <div ref={containerNomeRef} style={{ position: "relative" }}>
           <label>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
@@ -712,6 +998,55 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
           )}
         </div>
 
+        {/* Se for edição de promissória existente, oferece abas para editar parcela pontual ou unificar dívida total */}
+        {!isNova && (
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "14px 0 16px 0" }}>
+            <button
+              type="button"
+              className={`btn ghost ${modoEdicao === "parcela" ? "on" : ""}`}
+              onClick={() => setModoEdicao("parcela")}
+              style={{
+                padding: "9px 12px",
+                fontSize: 12.5,
+                fontWeight: 700,
+                borderRadius: 8,
+                borderColor: modoEdicao === "parcela" ? "var(--brand)" : "var(--line)",
+                background: modoEdicao === "parcela" ? "var(--soft)" : "transparent",
+                color: modoEdicao === "parcela" ? "var(--brand)" : "var(--ink)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <span>📝</span>
+              <span>Editar Parcela Pontual ({row.parcelas})</span>
+            </button>
+
+            <button
+              type="button"
+              className={`btn ghost ${modoEdicao === "compra_total" ? "on" : ""}`}
+              onClick={() => setModoEdicao("compra_total")}
+              style={{
+                padding: "9px 12px",
+                fontSize: 12.5,
+                fontWeight: 700,
+                borderRadius: 8,
+                borderColor: modoEdicao === "compra_total" ? "var(--brand)" : "var(--line)",
+                background: modoEdicao === "compra_total" ? "rgba(15, 118, 110, 0.12)" : "transparent",
+                color: modoEdicao === "compra_total" ? "var(--brand)" : "var(--ink)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 6,
+              }}
+            >
+              <span>🔀</span>
+              <span>Reparcelar / Unificar Dívida Total</span>
+            </button>
+          </div>
+        )}
+
         {isNova ? (
           <>
             <div className="r2">
@@ -820,10 +1155,257 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               </div>
             )}
           </>
+        ) : modoEdicao === "compra_total" ? (
+          /* MODO: REPARCELAR / UNIFICAR DÍVIDA TOTAL */
+          <div style={{ display: "grid", gap: 14 }}>
+            {/* Bloco 1: Seleção de Compras / Parcelas em Aberto a Unificar */}
+            <div
+              style={{
+                background: "var(--soft)",
+                borderRadius: 10,
+                padding: "12px 14px",
+                border: "1px solid var(--line)",
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", display: "flex", alignItems: "center", gap: 6 }}>
+                  <span>📦</span> Parcelas em aberto selecionadas para unificação:
+                </span>
+                <span style={{ fontWeight: 800, fontSize: 14, color: "var(--brand)" }}>
+                  Saldo: {money(saldoAnteriorDevedor)}
+                </span>
+              </div>
+
+              {/* Seletor de Escopo de Unificação */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  className={`chip ${escopoUnificacao === "carne" ? "on" : ""}`}
+                  onClick={() => setEscopoUnificacao("carne")}
+                  style={{
+                    padding: "4px 10px",
+                    fontSize: 11.5,
+                    fontWeight: 600,
+                    background: escopoUnificacao === "carne" ? "var(--brand)" : "var(--card)",
+                    color: escopoUnificacao === "carne" ? "#fff" : "var(--ink)",
+                    borderColor: escopoUnificacao === "carne" ? "var(--brand)" : "var(--line)",
+                  }}
+                >
+                  Apenas parcelas deste carnê ({compraDoRow?.rotuloParcelas || row?.parcelas})
+                </button>
+
+                {comprasCliente.length > 1 && (
+                  <button
+                    type="button"
+                    className={`chip ${escopoUnificacao === "todas_abertas" ? "on" : ""}`}
+                    onClick={() => setEscopoUnificacao("todas_abertas")}
+                    style={{
+                      padding: "4px 10px",
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      background: escopoUnificacao === "todas_abertas" ? "var(--brand)" : "var(--card)",
+                      color: escopoUnificacao === "todas_abertas" ? "#fff" : "var(--ink)",
+                      borderColor: escopoUnificacao === "todas_abertas" ? "var(--brand)" : "var(--line)",
+                    }}
+                  >
+                    Unificar todas as compras em aberto ({todasParcelasAbertasCliente.length} parcelas)
+                  </button>
+                )}
+              </div>
+
+              {/* Lista com chips das parcelas incluídas */}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", maxHeight: 110, overflowY: "auto" }}>
+                {(escopoUnificacao === "carne" ? parcelasAbertasDestaCompra : todasParcelasAbertasCliente).map(pItem => {
+                  const sel = idsParcelasSelecionadas.includes(pItem.id);
+                  return (
+                    <label
+                      key={pItem.id}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: 6,
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        border: "1px solid",
+                        borderColor: sel ? "var(--brand)" : "var(--line)",
+                        background: sel ? "rgba(15, 118, 110, 0.1)" : "var(--card)",
+                        fontSize: 11.5,
+                        cursor: "pointer",
+                        margin: 0,
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={sel}
+                        onChange={e => {
+                          if (e.target.checked) {
+                            setIdsParcelasSelecionadas(prev => [...prev, pItem.id]);
+                          } else {
+                            setIdsParcelasSelecionadas(prev => prev.filter(x => x !== pItem.id));
+                          }
+                        }}
+                        style={{ width: 14, height: 14, accentColor: "var(--brand)" }}
+                      />
+                      <span><b>{pItem.parcelas}</b>: {money(pItem.saldo_devedor)} <span style={{ color: "var(--mut)", fontSize: 10.5 }}>({dt(pItem.vencimento)})</span></span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Bloco 2: Adicionar Nova Compra e Entrada */}
+            <div className="r2">
+              <label>
+                Adicionar nova compra (R$)
+                <input
+                  value={novaCompra}
+                  onChange={e => setNovaCompra(formatarMascaraMoeda(e.target.value, true))}
+                  inputMode="numeric"
+                  placeholder="R$ 0,00 (Opcional)"
+                />
+                <span className="sub" style={{ fontSize: 10.5 }}>Se o cliente comprou produtos novos, informe o valor aqui.</span>
+              </label>
+
+              <label>
+                Valor pago de entrada / sinal (R$)
+                <input
+                  value={entradaUnificacao}
+                  onChange={e => setEntradaUnificacao(formatarMascaraMoeda(e.target.value, true))}
+                  inputMode="numeric"
+                  placeholder="R$ 0,00 (Opcional)"
+                />
+                <span className="sub" style={{ fontSize: 10.5 }}>Valor recebido em dinheiro ou Pix no ato da unificação.</span>
+              </label>
+            </div>
+
+            {/* Bloco 3: Card de Resumo da Nova Dívida Total */}
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                gap: 10,
+                padding: "10px 14px",
+                borderRadius: 10,
+                background: "var(--card)",
+                border: "1.5px solid var(--line)",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Saldo Devedor Anterior</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{money(saldoAnteriorDevedor)}</div>
+              </div>
+
+              {valorNovaCompraNum > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--brand)", textTransform: "uppercase" }}>+ Nova Compra</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brand)" }}>+ {money(valorNovaCompraNum)}</div>
+                </div>
+              )}
+
+              {valorEntradaUnificacaoNum > 0 && (
+                <div>
+                  <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase" }}>- Entrada Recebida</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>- {money(valorEntradaUnificacaoNum)}</div>
+                </div>
+              )}
+
+              <div style={{ borderLeft: "2px solid var(--line)", paddingLeft: 10 }}>
+                <div style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, textTransform: "uppercase" }}>TOTAL A REPARCELAR</div>
+                <div style={{ fontSize: 17, fontWeight: 900, color: "var(--brand)" }}>{money(saldoFinalAParcelar)}</div>
+              </div>
+            </div>
+
+            {/* Bloco 4: Novo Parcelamento (Qtd e 1º Vencimento) */}
+            <div className="r2">
+              <label>
+                Novo número de parcelas
+                <select
+                  value={qtdParcelasUnificacao}
+                  onChange={e => setQtdParcelasUnificacao(Number(e.target.value))}
+                >
+                  {Array.from({ length: 12 }, (_, idx) => idx + 1).map(num => (
+                    <option key={num} value={num}>
+                      {num === 1 ? "1x (Parcela única)" : `${num}x`}
+                    </option>
+                  ))}
+                  <option value={15}>15x</option>
+                  <option value={18}>18x</option>
+                  <option value={24}>24x</option>
+                </select>
+              </label>
+
+              <label>
+                1º Novo Vencimento
+                <input
+                  type="date"
+                  value={vencimentoUnificacao}
+                  onChange={e => setVencimentoUnificacao(e.target.value)}
+                  required
+                />
+              </label>
+            </div>
+
+            {/* Bloco 5: Prévia do Novo Carnê Unificado */}
+            {parcelasUnificadasCalculadas.length > 0 && (
+              <div
+                style={{
+                  background: "var(--soft)",
+                  borderRadius: 10,
+                  padding: "10px 14px",
+                  border: "1px solid var(--line)",
+                  maxHeight: 180,
+                  overflowY: "auto",
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 11.5, fontWeight: 700, color: "var(--mut)" }}>
+                  <span>NOVO CARNÊ REPARCELADO ({qtdParcelasUnificacao}X)</span>
+                  <span>VENCIMENTO MENSAL NO DIA {vencimentoUnificacao.slice(8, 10)}</span>
+                </div>
+                <table style={{ width: "100%", fontSize: 12.5, borderCollapse: "collapse", minWidth: 0 }}>
+                  <thead>
+                    <tr style={{ color: "var(--mut)", fontSize: 11, borderBottom: "1px solid var(--line)" }}>
+                      <th style={{ textAlign: "left", padding: "4px 0" }}>PARCELA</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>VALOR</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>VENCIMENTO</th>
+                      <th style={{ textAlign: "right", padding: "4px 0" }}>STATUS</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parcelasUnificadasCalculadas.map(item => (
+                      <tr key={item.numero} style={{ borderTop: "1px solid var(--line)" }}>
+                        <td style={{ padding: "5px 0", fontWeight: 600 }}>{item.parcela}</td>
+                        <td style={{ padding: "5px 0", textAlign: "right" }} className="mono">{money(item.valor)}</td>
+                        <td style={{ padding: "5px 0", textAlign: "right" }} className="mono">{dt(item.vencimento)}</td>
+                        <td style={{ padding: "5px 0", textAlign: "right" }}>
+                          <span className="pill p-vencendo" style={{ fontSize: 10.5, padding: "1px 6px" }}>
+                            A vencer
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Bloco 6: Observações da Unificação */}
+            <div>
+              <label>
+                Motivo / Observações do Acordo (opcional)
+                <input
+                  value={obsUnificacao}
+                  onChange={e => setObsUnificacao(e.target.value)}
+                  placeholder="ex.: Cliente comprou nova armação e solicitou unificação do parcelamento"
+                  maxLength={250}
+                />
+              </label>
+            </div>
+          </div>
         ) : (
+          /* MODO: EDITAR PARCELA PONTUAL */
           <>
             <div className="r2">
-              <label>Dívida (R$)<input value={t} onChange={e => setT(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" required /></label>
+              <label>Dívida desta parcela (R$)<input value={t} onChange={e => setT(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" required /></label>
               <label>Valor pago (R$)<input value={g} onChange={e => setG(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" /></label>
             </div>
             <div className="r2">
@@ -903,21 +1485,33 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         <div className="err">{err}</div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginTop: 4 }}>
           {!isNova ? (
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ color: "var(--bad)", borderColor: "var(--bad)", padding: "8px 12px", fontSize: 13 }}
-              onClick={handleDelete}
-              disabled={busy}
-              title="Excluir promissória permanentemente"
-            >
-              Excluir promissória
-            </button>
+            modoEdicao === "compra_total" ? (
+              <div style={{ fontSize: 12, color: "var(--mut)" }}>
+                💡 As parcelas antigas em aberto serão baixadas com registro de novação.
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ color: "var(--bad)", borderColor: "var(--bad)", padding: "8px 12px", fontSize: 13 }}
+                onClick={handleDelete}
+                disabled={busy}
+                title="Excluir promissória permanentemente"
+              >
+                Excluir promissória
+              </button>
+            )
           ) : <div />}
           <div style={{ display: "flex", gap: 8 }}>
             <button type="button" className="btn ghost" onClick={onClose}>Cancelar</button>
             <button className="btn" disabled={busy}>
-              {busy ? "Salvando…" : isNova && qtd > 1 ? `Salvar (${qtd} promissórias)` : "Salvar"}
+              {busy
+                ? "Processando…"
+                : !isNova && modoEdicao === "compra_total"
+                ? `Confirmar e Reparcelar (${qtdParcelasUnificacao}x)`
+                : isNova && qtd > 1
+                ? `Salvar (${qtd} promissórias)`
+                : "Salvar"}
             </button>
           </div>
         </div>
