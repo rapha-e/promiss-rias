@@ -112,6 +112,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [baixa, setBaixa] = useState<Row | null>(null);
   const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | null | undefined>(undefined);
+  const [escolherCompraCliente, setEscolherCompraCliente] = useState<ClienteConsolidado | null>(null);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState<Row | null>(null);
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
@@ -1694,7 +1695,19 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       </button>
                     )}
                     {isAdmin && (
-                      <button className="ed" onClick={() => setEditing(refRow)} title="Editar dados da promissória">
+                      <button
+                        className="ed"
+                        onClick={() => {
+                          const comprasAbertas = cli.compras.filter(c => c.emAberto);
+                          const lista = comprasAbertas.length > 0 ? comprasAbertas : cli.compras;
+                          if (lista.length > 1) {
+                            setEscolherCompraCliente(cli);
+                          } else {
+                            setEditing(refRow);
+                          }
+                        }}
+                        title={cli.temMultiplasComprasAbertas ? "Escolher qual compra editar" : "Editar dados da promissória"}
+                      >
                         Editar
                       </button>
                     )}
@@ -1747,6 +1760,200 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           onClose={() => setFichaCliente(null)}
           onChanged={refresh}
         />
+      )}
+      {/* Modal para Escolher qual compra deseja editar quando o cliente possui múltiplas compras */}
+      {escolherCompraCliente && (
+        <div className="ov" onClick={() => setEscolherCompraCliente(null)}>
+          <div
+            className="panel"
+            onClick={e => e.stopPropagation()}
+            style={{
+              width: "min(640px, 95vw)",
+              height: "auto",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              margin: "auto",
+              borderRadius: 16,
+              padding: 22,
+            }}
+          >
+            {/* Cabeçalho */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <h2 style={{ margin: "0 0 4px", fontSize: 18, display: "flex", alignItems: "center", gap: 8 }}>
+                  <span>🛍️</span> Escolha qual compra deseja editar
+                </h2>
+                <div className="sub" style={{ fontSize: 12.5 }}>
+                  O cliente <b>{escolherCompraCliente.cliente_nome}</b> possui{" "}
+                  <b>
+                    {(escolherCompraCliente.compras.filter(c => c.emAberto).length > 0
+                      ? escolherCompraCliente.compras.filter(c => c.emAberto)
+                      : escolherCompraCliente.compras
+                    ).length}{" "}
+                    compras
+                  </b>{" "}
+                  cadastradas. Selecione qual delas deseja editar:
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setEscolherCompraCliente(null)}
+                style={{ padding: "4px 8px", fontSize: 12 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Lista de compras */}
+            <div style={{ display: "grid", gap: 12, marginBottom: 18 }}>
+              {(escolherCompraCliente.compras.filter(c => c.emAberto).length > 0
+                ? escolherCompraCliente.compras.filter(c => c.emAberto)
+                : escolherCompraCliente.compras
+              ).map((compra, idx) => {
+                const prox = compra.proximaPromissoria || compra.promissorias[0];
+                return (
+                  <div
+                    key={compra.id || idx}
+                    style={{
+                      background: "var(--card)",
+                      border: "1.5px solid var(--line)",
+                      borderRadius: 12,
+                      padding: "14px 16px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 10,
+                      transition: "all .15s ease",
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.borderColor = "var(--brand)";
+                      e.currentTarget.style.boxShadow = "0 4px 12px rgba(15, 118, 110, 0.08)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.borderColor = "var(--line)";
+                      e.currentTarget.style.boxShadow = "none";
+                    }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "var(--ink)", display: "flex", alignItems: "center", gap: 8 }}>
+                          <span>📦 {compra.titulo}</span>
+                          <span className={`pill p-${cls(compra.status)}`} style={{ fontSize: 11, padding: "1px 8px" }}>
+                            {LBL[compra.status] || compra.status}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 2 }}>
+                          Parcelas: <b>{compra.parcelasPagas} pagas</b> de <b>{compra.totalParcelas} no total</b> ({compra.parcelasAbertas} em aberto)
+                        </div>
+                      </div>
+
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Saldo Devedor</div>
+                        <div style={{ fontWeight: 800, fontSize: 16, color: "var(--brand)" }}>
+                          {money(compra.saldoDevedor)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Informações de vencimento e parcelas da compra */}
+                    <div
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        flexWrap: "wrap",
+                        gap: 8,
+                        padding: "8px 10px",
+                        background: "var(--soft)",
+                        borderRadius: 8,
+                        fontSize: 12,
+                      }}
+                    >
+                      <div>
+                        Próximo vencimento: <b className="mono">{dt(compra.proximoVencimento)}</b>
+                        {prox?.parcelas && <span style={{ marginLeft: 6, color: "var(--mut)" }}>({prox.parcelas})</span>}
+                      </div>
+
+                      {/* Botão de ação para editar a compra */}
+                      <button
+                        type="button"
+                        className="btn"
+                        onClick={() => {
+                          const rowAlvo = prox || compra.promissorias[0];
+                          setEscolherCompraCliente(null);
+                          setEditing(rowAlvo);
+                        }}
+                        style={{
+                          padding: "6px 14px",
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                        }}
+                      >
+                        ✏️ Editar esta Compra ({prox?.parcelas || compra.rotuloParcelas})
+                      </button>
+                    </div>
+
+                    {/* Se for um carnê com mais de uma parcela, permitir escolher a parcela específica caso queira */}
+                    {compra.promissorias.length > 1 && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", fontSize: 11.5, marginTop: 2 }}>
+                        <span style={{ color: "var(--mut)", fontSize: 11 }}>Ou selecione uma parcela específica:</span>
+                        {compra.promissorias.map(pRow => {
+                          const estaPaga = (pRow.saldo_devedor ?? 0) <= 0;
+                          return (
+                            <button
+                              key={pRow.id}
+                              type="button"
+                              className="chip"
+                              onClick={() => {
+                                setEscolherCompraCliente(null);
+                                setEditing(pRow);
+                              }}
+                              style={{
+                                padding: "2px 7px",
+                                fontSize: 11,
+                                background: estaPaga ? "rgba(22, 163, 74, 0.08)" : "var(--card)",
+                                borderColor: estaPaga ? "#16a34a" : "var(--line)",
+                                color: estaPaga ? "#15803d" : "var(--ink)",
+                              }}
+                              title={`Editar parcela ${pRow.parcelas} (Venc: ${dt(pRow.vencimento)}${estaPaga ? " - Quitada" : ""})`}
+                            >
+                              {pRow.parcelas} {estaPaga ? "✓" : ""}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Rodapé com atalho para Ficha do Cliente e Fechar */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: "1px solid var(--line)", paddingTop: 14 }}>
+              <button
+                type="button"
+                className="link-cli"
+                onClick={() => {
+                  const cli = escolherCompraCliente;
+                  setEscolherCompraCliente(null);
+                  setFichaCliente({ cliente: cli.cliente_nome, telefone: cli.telefone });
+                }}
+                style={{ fontSize: 12.5, color: "var(--brand)" }}
+              >
+                🔍 Ver histórico completo na Ficha do Cliente →
+              </button>
+
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setEscolherCompraCliente(null)}
+                style={{ padding: "6px 14px", fontSize: 12.5 }}
+              >
+                Fechar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );
