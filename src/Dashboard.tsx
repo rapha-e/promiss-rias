@@ -396,11 +396,15 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
     const f90a180 = abertas.filter(r => r.dias_atraso >= 91 && r.dias_atraso <= 180);
     const val90a180 = f90a180.reduce((s, r) => s + r.saldo_devedor, 0);
 
-    // 7. Acima de 180 dias (+180d)
-    const fMais180 = abertas.filter(r => r.dias_atraso > 180);
-    const valMais180 = fMais180.reduce((s, r) => s + r.saldo_devedor, 0);
+    // 7. 180 a 360 dias
+    const f180a360 = abertas.filter(r => r.dias_atraso >= 181 && r.dias_atraso <= 360);
+    const val180a360 = f180a360.reduce((s, r) => s + r.saldo_devedor, 0);
 
-    // 8. Fundo Perdido
+    // 8. Acima de 360 dias (+360d)
+    const fMais360 = abertas.filter(r => r.dias_atraso > 360);
+    const valMais360 = fMais360.reduce((s, r) => s + r.saldo_devedor, 0);
+
+    // 9. Fundo Perdido
     const valPerdido = perdidas.reduce((s, r) => s + r.saldo_devedor, 0);
 
     return [
@@ -483,17 +487,30 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         estrategiaSugerida: "Proposta agressiva de repactuação com entrada facilitada ou desconto de 30% à vista.",
       },
       {
-        id: "mais_180",
-        titulo: "Acima de 180 dias",
-        subtitulo: "Crítico / Alta inadimplência",
-        diasLabel: "+180 dias",
+        id: "180_360",
+        titulo: "180 a 360 dias",
+        subtitulo: "Atraso crítico / Cobrança intensiva",
+        diasLabel: "180–360 dias",
+        cor: "#991b1b",
+        bgCor: "rgba(153, 27, 27, 0.08)",
+        nivelRisco: "critico",
+        qtd: f180a360.length,
+        valor: val180a360,
+        porcentagemDoVencido: (val180a360 / totalVenc) * 100,
+        estrategiaSugerida: "Feirão de quitação: desconto agressivo à vista (40% a 50%) via PIX ou notificação extrajudicial.",
+      },
+      {
+        id: "mais_360",
+        titulo: "Acima de 360 dias",
+        subtitulo: "Inadimplência crônica / Pré-perda",
+        diasLabel: "+360 dias",
         cor: "#7f1d1d",
         bgCor: "rgba(127, 29, 29, 0.1)",
         nivelRisco: "critico",
-        qtd: fMais180.length,
-        valor: valMais180,
-        porcentagemDoVencido: (valMais180 / totalVenc) * 100,
-        estrategiaSugerida: "Feirão de quitação: desconto agressivo à vista (40% a 50%) via PIX imediato.",
+        qtd: fMais360.length,
+        valor: valMais360,
+        porcentagemDoVencido: (valMais360 / totalVenc) * 100,
+        estrategiaSugerida: "Última tentativa de resgate com desconto máximo (50% a 60%) ou avaliação para lançamento em fundo perdido.",
       },
       {
         id: "perdido",
