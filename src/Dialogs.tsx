@@ -662,6 +662,68 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         } catch (_) {}
       }
 
+      // 1.1 Parcelas do mesmo carnê/compra que já estavam quitadas anteriormente:
+      // Como o carnê foi repactuado e seu valor já pago foi abatido no novo carnê, essas parcelas anteriores
+      // também são marcadas como repactuadas contábilmente para manter a coerência histórica total do carnê.
+      const parcelasQuitadasMesmoCarne: Row[] = [];
+      if (compraDoRow && Array.isArray(compraDoRow.promissorias)) {
+        for (const p of compraDoRow.promissorias) {
+          if (!parcelasParaUnificar.some(u => u.id === p.id) && !ehRepactuada(p)) {
+            parcelasQuitadasMesmoCarne.push(p);
+          }
+        }
+      } else if (parcelasCarne && parcelasCarne.length > 0) {
+        for (const p of parcelasCarne) {
+          if (!parcelasParaUnificar.some(u => u.id === p.id) && !ehRepactuada(p)) {
+            parcelasQuitadasMesmoCarne.push(p);
+          }
+        }
+      }
+
+      for (const pQuitada of parcelasQuitadasMesmoCarne) {
+        let logsArray: any[] = [];
+        if (pQuitada.origem) {
+          try {
+            const parsed = JSON.parse(pQuitada.origem);
+            if (Array.isArray(parsed)) logsArray = parsed;
+            else logsArray.push({ origemOriginal: pQuitada.origem });
+          } catch (_) {
+            logsArray.push({ origemOriginal: pQuitada.origem });
+          }
+        }
+        logsArray.push({
+          data: agoraIso,
+          valor: 0,
+          saldoRepactuado: 0,
+          operador: operadorEmail,
+          detalhes: tipoAjusteUnificacao === "troca_menor_valor"
+            ? `Parcela quitada anteriormente (${money(pQuitada.valor_pago)}), repactuada e abatida no novo carnê por motivo de troca por produto de menor valor em ${qtdParcelasUnificacao}x.`
+            : `Parcela quitada anteriormente, repactuada contabilmente na unificação/reparcelamento do carnê em ${qtdParcelasUnificacao}x.`,
+          acordo: {
+            tipo: tipoAjusteUnificacao === "troca_menor_valor" ? "TROCA_PRODUTO_MENOR_VALOR" : "REPACTUACAO_BAIXA",
+            subtipo: "PARCELA_QUITADA_REPACTUADA",
+            parcelasQtd: qtdParcelasUnificacao,
+            saldoTotalAnterior: saldoAnteriorDevedor,
+            novoOculos: tipoAjusteUnificacao === "troca_menor_valor" ? valorNovoOculosNum : undefined,
+            jaPagoAbatido: tipoAjusteUnificacao === "troca_menor_valor" ? valorJaPagoAbaterNum : undefined,
+            novoSaldo: saldoFinalAParcelar,
+            titulosEnvolvidos: [...titulosAntigosIds, pQuitada.id],
+            observacoes: obsUnificacao.trim() || undefined,
+          },
+        });
+
+        const { error: errQuitadaUpd } = await supabase
+          .from("promissorias")
+          .update({
+            origem: JSON.stringify(logsArray),
+          })
+          .eq("id", pQuitada.id);
+
+        if (errQuitadaUpd) {
+          console.warn(`Aviso ao atualizar histórico de parcela quitada #${pQuitada.id}:`, errQuitadaUpd.message);
+        }
+      }
+
       // 2. Gerar as novas promissórias
       const loteId = tipoAjusteUnificacao === "troca_menor_valor" ? `TROCA_${Date.now()}` : `UNIF_${Date.now()}`;
       const novasPayload = parcelasUnificadasCalculadas.map(item => ({
