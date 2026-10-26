@@ -189,31 +189,39 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     return parcelasParaUnificar.reduce((acc, p) => acc + (p.saldo_devedor ?? 0), 0);
   }, [parcelasParaUnificar]);
 
-  // Calcula o total já pago nesta compra ou carnê para sugerir o abatimento na troca
+  // Calcula o total já pago especificamente na compra do carnê atual (sem misturar com compras antigas)
   const valorPagoDetectadoCompra = useMemo(() => {
-    if (compraDoRow && typeof compraDoRow.valorPago === "number" && compraDoRow.valorPago > 0) {
-      return compraDoRow.valorPago;
+    // 1. Se identificou a compra à qual a parcela pertence, analisa EXCLUSIVAMENTE as promissórias desta compra
+    if (compraDoRow && Array.isArray(compraDoRow.promissorias) && compraDoRow.promissorias.length > 0) {
+      return compraDoRow.promissorias
+        .filter(p => !ehRepactuada(p))
+        .reduce((acc, p) => acc + (p.valor_pago || 0), 0);
     }
-    if (parcelasCarne.length > 0) {
-      const soma = parcelasCarne.reduce((acc, p) => acc + (p.valor_pago || 0), 0);
-      if (soma > 0) return soma;
-    }
-    if (todasPromissoriasCliente.length > 0) {
-      const quitadas = todasPromissoriasCliente.filter(p => (p.saldo_devedor ?? 0) <= 0);
-      if (quitadas.length > 0) {
-        return quitadas.reduce((acc, p) => acc + (p.valor_pago || p.divida_total || 0), 0);
-      }
-    }
-    return 0;
-  }, [compraDoRow, parcelasCarne, todasPromissoriasCliente]);
 
-  // Pré-preenche o campo de abatimento com o valor já pago detectado na primeira vez
-  useEffect(() => {
-    if (valorPagoDetectadoCompra > 0 && !jaPagoPreenchidoAuto) {
-      setValorJaPagoAbater(formatarMascaraMoeda(valorPagoDetectadoCompra));
-      setJaPagoPreenchidoAuto(true);
+    // 2. Fallback apenas se houver parcelas do mesmo carnê específico carregadas
+    if (parcelasCarne.length > 0) {
+      return parcelasCarne
+        .filter(p => !ehRepactuada(p))
+        .reduce((acc, p) => acc + (p.valor_pago || 0), 0);
     }
-  }, [valorPagoDetectadoCompra, jaPagoPreenchidoAuto]);
+
+    // 3. Fallback pontual: apenas a parcela atual, se foi parcialmente paga em dinheiro
+    if (row && !ehRepactuada(row)) {
+      return row.valor_pago || 0;
+    }
+
+    return 0;
+  }, [compraDoRow, parcelasCarne, row]);
+
+  // Reseta estado de auto preenchimento quando trocar a parcela selecionada
+  useEffect(() => {
+    setJaPagoPreenchidoAuto(false);
+    if (valorPagoDetectadoCompra > 0) {
+      setValorJaPagoAbater(formatarMascaraMoeda(valorPagoDetectadoCompra));
+    } else {
+      setValorJaPagoAbater("");
+    }
+  }, [row?.id, valorPagoDetectadoCompra]);
 
   const valorNovaCompraNum = parse(novaCompra) || 0;
   const valorAbatimentoManualNum = parse(abatimentoManual) || 0;
@@ -643,15 +651,14 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
         if (errUpd) throw new Error(`Erro ao baixar parcela #${pRow.id}: ${errUpd.message}`);
 
+        // NOTA DE AUDITORIA: Não insere em promissoria_pagamentos porque não houve entrada física de dinheiro no caixa (é novação/troca contábil).
         try {
-          await supabase.from("promissoria_pagamentos").insert({
-            promissoria_id: pRow.id,
-            valor_pago: pRow.saldo_devedor,
-            operador_email: operadorEmail,
-            operador_id: operadorId,
-            data_pagamento: agoraIso,
-            detalhes: detalhesAcordo,
-          });
+          // Remove qualquer lançamento de pagamento indevido prévio desta promissória baixada por repactuação
+          await supabase
+            .from("promissoria_pagamentos")
+            .delete()
+            .eq("promissoria_id", pRow.id)
+            .ilike("detalhes", "%Troca por produto%");
         } catch (_) {}
       }
 
@@ -1951,7 +1958,11 @@ export function FichaCliente({
   }, [rows, compraAtiva]);
 
   const totalOutrasQuitadas = useMemo(() => {
-    return promissoriasOutras.filter(r => !r.fundo_perdido && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
+    return promissoriasOutras.filter(r => !r.fundo_perdido && !ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
+  }, [promissoriasOutras]);
+
+  const totalOutrasRepactuadas = useMemo(() => {
+    return promissoriasOutras.filter(r => !r.fundo_perdido && ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
   }, [promissoriasOutras]);
 
   const rowsFiltradas = useMemo(() => {
@@ -2080,6 +2091,10 @@ export function FichaCliente({
             {totalOutrasQuitadas > 0 ? (
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
                 ✓ {money(totalOutrasQuitadas)} quitados em compras anteriores
+              </span>
+            ) : totalOutrasRepactuadas > 0 ? (
+              <span className="ksub" style={{ color: "#7e22ce", fontWeight: 600 }}>
+                🔄 {money(totalOutrasRepactuadas)} repactuados de compras anteriores
               </span>
             ) : (compraAtiva?.parcelasPagas ?? 0) > 0 ? (
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
@@ -2238,7 +2253,15 @@ export function FichaCliente({
                     <td><VencCell r={r} /></td>
                     <td className="mono">{r.parcelas || "—"}</td>
                     <td className="n">{money(r.divida_total)}</td>
-                    <td className="n">{money(r.valor_pago)}</td>
+                    <td className="n">
+                      {ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0 ? (
+                        <span style={{ color: "#7e22ce", fontWeight: 600, fontSize: 12 }} title="Título baixado por repactuação / troca de produto (sem entrada em dinheiro)">
+                          Repactuado
+                        </span>
+                      ) : (
+                        money(r.valor_pago)
+                      )}
+                    </td>
                     <td className="n"><b>{money(r.saldo_devedor)}</b></td>
                     <td><StatusPill r={r} />{r.fundo_perdido && <div className="sub">{r.fundo_perdido_motivo}{r.fundo_perdido_em ? ` · ${dt(r.fundo_perdido_em.slice(0, 10))}` : ""}</div>}</td>
                     <td className="acts">

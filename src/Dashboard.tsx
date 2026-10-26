@@ -206,12 +206,22 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       try {
         const { data: pags, error: errPags } = await supabase
           .from("promissoria_pagamentos")
-          .select("promissoria_id, valor_pago, data_pagamento, promissorias(vencimento)")
+          .select("promissoria_id, valor_pago, data_pagamento, detalhes, promissorias(vencimento)")
           .gte("data_pagamento", inicioMesIso)
           .lt("data_pagamento", inicioProxMesIso);
 
         if (!errPags && pags) {
           for (const p of pags) {
+            // Ignora baixas contábeis de troca/repactuação (não representam dinheiro em caixa)
+            if (p.detalhes && (
+              p.detalhes.includes("Troca por produto") ||
+              p.detalhes.includes("Troca por óculos") ||
+              p.detalhes.includes("Unificação e reparcelamento") ||
+              p.detalhes.includes("REPACTUACAO_BAIXA") ||
+              p.detalhes.includes("Acordo de Repactuação")
+            )) {
+              continue;
+            }
             const key = `${p.promissoria_id}_${p.data_pagamento}_${p.valor_pago}`;
             const dtPag = new Date((p.data_pagamento || "").slice(0, 10) + "T00:00:00Z").getTime();
             const venc = (p.promissorias as any)?.vencimento;
@@ -238,7 +248,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                 for (const item of parsed) {
                   if (item.data && typeof item.data === "string" && item.data.startsWith(mesAnoFiltro)) {
                     // Ignora baixas contábeis por novação/repactuação de dívida (sem entrada em dinheiro)
-                    if (item.acordo?.tipo === "REPACTUACAO_BAIXA" || (typeof item.detalhes === "string" && item.detalhes.includes("Acordo de Repactuação"))) {
+                    if (item.acordo?.tipo === "REPACTUACAO_BAIXA" || item.acordo?.tipo === "TROCA_PRODUTO_MENOR_VALOR" || item.acordo?.tipo === "TROCA_PRODUTO" || (typeof item.detalhes === "string" && (item.detalhes.includes("Acordo de Repactuação") || item.detalhes.includes("Troca por produto") || item.detalhes.includes("Troca por óculos") || item.detalhes.includes("Unificação e reparcelamento")))) {
                       continue;
                     }
                     const val = item.valor || 0;

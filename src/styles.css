@@ -133,3 +133,5 @@ label.inl{display:flex;align-items:center;gap:6px;color:var(--mut)}
   .card{break-inside:avoid;animation:none}
   .kpis,.faixas{grid-template-columns:repeat(4,1fr)}
 }
+
+.p-REPACTUADO { color: #7e22ce !important; background: rgba(147, 51, 234, 0.12) !important; border-color: #a855f7 !important; font-weight: 700; }

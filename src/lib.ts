@@ -1,4 +1,4 @@
-export type Status = "QUITADO" | "PAGANDO" | "NÃO PAGOU" | "A VENCER" | "FUNDO PERDIDO";
+export type Status = "QUITADO" | "PAGANDO" | "NÃO PAGOU" | "A VENCER" | "FUNDO PERDIDO" | "REPACTUADO";
 export type Row = {
   id: number; cliente_nome: string; telefone: string; divida_total: number; parcelas: string;
   valor_pago: number; saldo_devedor: number; vencimento: string | null; ano: number | null; status: Status;
@@ -36,14 +36,25 @@ export const LBL: Record<Status, string> = {
   PAGANDO: "Pagando",
   "NÃO PAGOU": "Não pagou",
   "A VENCER": "A vencer",
-  "FUNDO PERDIDO": "Fundo perdido"
+  "FUNDO PERDIDO": "Fundo perdido",
+  REPACTUADO: "Repactuado"
 };
 export const cls = (s: Status) => (s === "A VENCER" ? "VENCER" : s.split(" ")[0]);
 
 /** Identifica se uma promissória foi baixada por Acordo de Repactuação (novação de dívida) */
 export function ehRepactuada(r: { origem?: string | null }): boolean {
   if (!r || !r.origem) return false;
-  return r.origem.includes("REPACTUACAO_BAIXA") || r.origem.includes("Acordo de Repactuação");
+  const o = r.origem;
+  return (
+    o.includes("REPACTUACAO_BAIXA") ||
+    o.includes("TROCA_PRODUTO_MENOR_VALOR") ||
+    o.includes("TROCA_PRODUTO") ||
+    o.includes("Acordo de Repactuação") ||
+    o.includes("Troca por produto") ||
+    o.includes("Troca por óculos") ||
+    o.includes("Unificação e reparcelamento") ||
+    (o.includes("saldoRepactuado") && !o.includes("NOVA_PARCELA"))
+  );
 }
 export const dt = (d: string | null | undefined) => {
   if (!d) return "Sem vencimento";
@@ -80,9 +91,11 @@ export function deriveStatus(r: {
   saldo_devedor?: number;
   vencimento?: string | null;
   parcelas?: string | null;
+  origem?: string | null;
 }): Status {
   if (r.fundo_perdido) return "FUNDO PERDIDO";
   const saldo = r.saldo_devedor ?? Math.max(r.divida_total - r.valor_pago, 0);
+  if (ehRepactuada(r) && saldo <= 0) return "REPACTUADO";
   if (saldo <= 0) return "QUITADO";
   const h = hoje();
   const vencReal = obterVencimentoEfetivo(r) || r.vencimento;
