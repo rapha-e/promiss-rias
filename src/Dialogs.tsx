@@ -547,17 +547,17 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   async function submitUnificacao() {
     if (tipoAjusteUnificacao === "troca_menor_valor") {
       if (valorNovoOculosNum <= 0) {
-        setErr("Informe o valor total do novo óculos.");
+        setErr("Informe o valor total do novo produto.");
         return;
       }
       if (saldoFinalAParcelar <= 0 && creditoClienteTroca > 0) {
-        setErr(`O valor já pago (${money(valorJaPagoAbaterNum)}) cobre todo o novo óculos (${money(valorNovoOculosNum)}). O cliente possui um crédito/troco de ${money(creditoClienteTroca)}. Não há saldo devedor a reparcelar.`);
+        setErr(`O valor já pago (${money(valorJaPagoAbaterNum)}) cobre todo o novo produto (${money(valorNovoOculosNum)}). O cliente possui um crédito/troco de ${money(creditoClienteTroca)}. Não há saldo devedor a reparcelar.`);
         return;
       }
     }
 
     if (parcelasParaUnificar.length === 0 && valorNovaCompraNum <= 0 && valorNovoOculosNum <= 0) {
-      setErr("Selecione ao menos uma parcela em aberto ou informe o valor do novo óculos / nova compra.");
+      setErr("Selecione ao menos uma parcela em aberto ou informe o valor do novo produto / nova compra.");
       return;
     }
     if (saldoFinalAParcelar <= 0) {
@@ -571,8 +571,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
     const confirmou = window.confirm(
       tipoAjusteUnificacao === "troca_menor_valor"
-        ? `Confirmar TROCA POR ÓCULOS DE MENOR VALOR e novo parcelamento para ${n.trim()}?\n\n` +
-          `• Valor do novo óculos: ${money(valorNovoOculosNum)}\n` +
+        ? `Confirmar TROCA POR PRODUTO DE MENOR VALOR e novo parcelamento para ${n.trim()}?\n\n` +
+          `• Valor do novo produto: ${money(valorNovoOculosNum)}\n` +
           `• Abatimento do que já foi pago: - ${money(valorJaPagoAbaterNum)}\n` +
           (valorEntradaUnificacaoNum > 0 ? `• Entrada no ato (dinheiro/Pix): - ${money(valorEntradaUnificacaoNum)}\n` : "") +
           `• Novo saldo a reparcelar: ${money(saldoFinalAParcelar)} em ${qtdParcelasUnificacao}x de aprox. ${money(Math.round(saldoFinalAParcelar / qtdParcelasUnificacao))}\n` +
@@ -599,7 +599,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       const agoraIso = new Date().toISOString();
       const titulosAntigosIds = parcelasParaUnificar.map(pRow => pRow.id);
       const detalhesAcordo = tipoAjusteUnificacao === "troca_menor_valor"
-        ? `Troca por óculos de menor valor em ${qtdParcelasUnificacao}x realizada em ${new Date().toLocaleDateString("pt-BR")}. Valor do novo óculos: ${money(valorNovoOculosNum)}, abatimento do já pago: ${money(valorJaPagoAbaterNum)}, entrada no ato: ${money(valorEntradaUnificacaoNum)}, novo saldo reparcelado: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`
+        ? `Troca por produto de menor valor em ${qtdParcelasUnificacao}x realizada em ${new Date().toLocaleDateString("pt-BR")}. Valor do novo produto: ${money(valorNovoOculosNum)}, abatimento do já pago: ${money(valorJaPagoAbaterNum)}, entrada no ato: ${money(valorEntradaUnificacaoNum)}, novo saldo reparcelado: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`
         : `Unificação e reparcelamento em ${qtdParcelasUnificacao}x realizado em ${new Date().toLocaleDateString("pt-BR")}. Saldo devedor anterior: ${money(saldoAnteriorDevedor)}, nova compra: ${money(valorNovaCompraNum)}, abatimento/desconto: ${money(valorAbatimentoManualNum)}, entrada: ${money(valorEntradaUnificacaoNum)}, novo total: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`;
 
       // 1. Baixar as parcelas antigas selecionadas
@@ -669,7 +669,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             data: agoraIso,
             valor: 0,
             operador: operadorEmail,
-            detalhes: `Promissória gerada por ${tipoAjusteUnificacao === "troca_menor_valor" ? "troca de óculos" : "unificação/reparcelamento"} (${item.parcela}). ${detalhesAcordo}`,
+            detalhes: `Promissória gerada por ${tipoAjusteUnificacao === "troca_menor_valor" ? "troca de produto" : "unificação/reparcelamento"} (${item.parcela}). ${detalhesAcordo}`,
             acordo: {
               tipo: tipoAjusteUnificacao === "troca_menor_valor" ? "NOVA_PARCELA_TROCA_PRODUTO" : "NOVA_PARCELA_REPACTUADA",
               loteId,
@@ -713,7 +713,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       setBusy(false);
       alert(
         tipoAjusteUnificacao === "troca_menor_valor"
-          ? `✅ Troca por óculos de menor valor realizada com sucesso!\n\n` +
+          ? `✅ Troca por produto de menor valor realizada com sucesso!\n\n` +
             `• ${parcelasParaUnificar.length} parcela(s) antiga(s) baixada(s) por novação/troca.\n` +
             `• Abatimento aplicado do que já foi pago: ${money(valorJaPagoAbaterNum)}.\n` +
             `• ${qtdParcelasUnificacao} nova(s) parcela(s) gerada(s) totalizando ${money(saldoFinalAParcelar)}.\n` +
@@ -1396,7 +1396,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 }}
               >
                 <span>🔄</span>
-                <span>Troca por Óculos de Menor Valor</span>
+                <span>Troca por Produto de Menor Valor</span>
               </button>
             </div>
 
@@ -1415,7 +1415,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
                   <div style={{ fontWeight: 700, fontSize: 13, color: "#0369a1", display: "flex", alignItems: "center", gap: 6 }}>
                     <span>👓</span>
-                    <span>Troca de Produto: Abater o já pago e reparcelar o novo óculos</span>
+                    <span>Troca de Produto: Abater o já pago e reparcelar o novo produto</span>
                   </div>
                   {valorPagoDetectadoCompra > 0 && (
                     <span style={{ fontSize: 11, background: "rgba(21, 128, 61, 0.12)", color: "#15803d", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
@@ -1426,7 +1426,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
                 <div className="r2">
                   <label>
-                    <span style={{ color: "var(--ink)", fontWeight: 700 }}>Valor do NOVO óculos (R$) *</span>
+                    <span style={{ color: "var(--ink)", fontWeight: 700 }}>Valor do NOVO produto (R$) *</span>
                     <input
                       value={valorNovoOculos}
                       onChange={e => setValorNovoOculos(formatarMascaraMoeda(e.target.value, true))}
@@ -1435,7 +1435,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                       style={{ borderColor: "#0284c7", fontWeight: 700, fontSize: 14 }}
                       autoFocus
                     />
-                    <span className="sub" style={{ fontSize: 10.5 }}>Preço de venda do óculos de menor valor.</span>
+                    <span className="sub" style={{ fontSize: 10.5 }}>Preço de venda do produto de menor valor.</span>
                   </label>
 
                   <label>
@@ -1446,7 +1446,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                       inputMode="numeric"
                       placeholder="R$ 0,00"
                     />
-                    <span className="sub" style={{ fontSize: 10.5 }}>Valor das parcelas já pagas a descontar do novo óculos.</span>
+                    <span className="sub" style={{ fontSize: 10.5 }}>Valor das parcelas já pagas a descontar do novo produto.</span>
                   </label>
                 </div>
 
@@ -1512,7 +1512,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 }}
               >
                 <div>
-                  <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Novo Óculos</div>
+                  <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Novo Produto</div>
                   <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{money(valorNovoOculosNum)}</div>
                 </div>
 
@@ -1595,7 +1595,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               >
                 <span>⚠️</span>
                 <div>
-                  <b>Atenção:</b> O valor já pago ({money(valorJaPagoAbaterNum)}) é maior que o valor do novo óculos ({money(valorNovoOculosNum)}). O cliente quitou integralmente o novo produto e possui um <b>crédito/troco de {money(creditoClienteTroca)}</b> a ser devolvido ou utilizado na loja.
+                  <b>Atenção:</b> O valor já pago ({money(valorJaPagoAbaterNum)}) é maior que o valor do novo produto ({money(valorNovoOculosNum)}). O cliente quitou integralmente o novo produto e possui um <b>crédito/troco de {money(creditoClienteTroca)}</b> a ser devolvido ou utilizado na loja.
                 </div>
               </div>
             )}
@@ -1682,7 +1682,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                   onChange={e => setObsUnificacao(e.target.value)}
                   placeholder={
                     tipoAjusteUnificacao === "troca_menor_valor"
-                      ? "ex.: Cliente trocou por óculos de menor valor, saldo recalculado abatendo o já pago"
+                      ? "ex.: Cliente trocou por produto de menor valor, saldo recalculado abatendo o já pago"
                       : "ex.: Cliente comprou nova armação e solicitou unificação do parcelamento"
                   }
                   maxLength={250}
