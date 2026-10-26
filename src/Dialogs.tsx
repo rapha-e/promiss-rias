@@ -76,12 +76,17 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   // Modo de edição: "parcela" para ajustes pontuais na parcela individual, ou "compra_total" para unificar/reparcelar
   const [modoEdicao, setModoEdicao] = useState<"parcela" | "compra_total">("parcela");
 
-  // Estados para Unificação / Reparcelamento da Dívida Total
+  // Estados para Unificação / Reparcelamento da Dívida Total / Troca por Menor Valor
   const [todasPromissoriasCliente, setTodasPromissoriasCliente] = useState<Row[]>([]);
   const [carregandoTitulosCliente, setCarregandoTitulosCliente] = useState(false);
   const [escopoUnificacao, setEscopoUnificacao] = useState<"carne" | "todas_abertas">("carne");
   const [idsParcelasSelecionadas, setIdsParcelasSelecionadas] = useState<number[]>([]);
+  const [tipoAjusteUnificacao, setTipoAjusteUnificacao] = useState<"padrao" | "troca_menor_valor">("padrao");
   const [novaCompra, setNovaCompra] = useState<string>("");
+  const [abatimentoManual, setAbatimentoManual] = useState<string>("");
+  const [valorNovoOculos, setValorNovoOculos] = useState<string>("");
+  const [valorJaPagoAbater, setValorJaPagoAbater] = useState<string>("");
+  const [jaPagoPreenchidoAuto, setJaPagoPreenchidoAuto] = useState<boolean>(false);
   const [entradaUnificacao, setEntradaUnificacao] = useState<string>("");
   const [qtdParcelasUnificacao, setQtdParcelasUnificacao] = useState<number>(4);
   const [vencimentoUnificacao, setVencimentoUnificacao] = useState<string>(somaDias(hoje(), 30));
@@ -184,10 +189,67 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     return parcelasParaUnificar.reduce((acc, p) => acc + (p.saldo_devedor ?? 0), 0);
   }, [parcelasParaUnificar]);
 
+  // Calcula o total já pago nesta compra ou carnê para sugerir o abatimento na troca
+  const valorPagoDetectadoCompra = useMemo(() => {
+    if (compraDoRow && typeof compraDoRow.valorPago === "number" && compraDoRow.valorPago > 0) {
+      return compraDoRow.valorPago;
+    }
+    if (parcelasCarne.length > 0) {
+      const soma = parcelasCarne.reduce((acc, p) => acc + (p.valor_pago || 0), 0);
+      if (soma > 0) return soma;
+    }
+    if (todasPromissoriasCliente.length > 0) {
+      const quitadas = todasPromissoriasCliente.filter(p => (p.saldo_devedor ?? 0) <= 0);
+      if (quitadas.length > 0) {
+        return quitadas.reduce((acc, p) => acc + (p.valor_pago || p.divida_total || 0), 0);
+      }
+    }
+    return 0;
+  }, [compraDoRow, parcelasCarne, todasPromissoriasCliente]);
+
+  // Pré-preenche o campo de abatimento com o valor já pago detectado na primeira vez
+  useEffect(() => {
+    if (valorPagoDetectadoCompra > 0 && !jaPagoPreenchidoAuto) {
+      setValorJaPagoAbater(formatarMascaraMoeda(valorPagoDetectadoCompra));
+      setJaPagoPreenchidoAuto(true);
+    }
+  }, [valorPagoDetectadoCompra, jaPagoPreenchidoAuto]);
+
   const valorNovaCompraNum = parse(novaCompra) || 0;
+  const valorAbatimentoManualNum = parse(abatimentoManual) || 0;
+  const valorNovoOculosNum = parse(valorNovoOculos) || 0;
+  const valorJaPagoAbaterNum = parse(valorJaPagoAbater) || 0;
   const valorEntradaUnificacaoNum = parse(entradaUnificacao) || 0;
 
-  const saldoFinalAParcelar = Math.max(0, saldoAnteriorDevedor + valorNovaCompraNum - valorEntradaUnificacaoNum);
+  // Cálculo preciso do saldo final a reparcelar e eventual crédito a favor do cliente
+  const { saldoFinalAParcelar, creditoClienteTroca } = useMemo(() => {
+    if (tipoAjusteUnificacao === "troca_menor_valor") {
+      if (valorNovoOculosNum <= 0) {
+        return { saldoFinalAParcelar: 0, creditoClienteTroca: 0 };
+      }
+      // Valor do novo óculos - valor já pago - entrada adicional no ato
+      const saldoLiq = valorNovoOculosNum - valorJaPagoAbaterNum - valorEntradaUnificacaoNum;
+      if (saldoLiq < 0) {
+        return { saldoFinalAParcelar: 0, creditoClienteTroca: Math.abs(saldoLiq) };
+      }
+      return { saldoFinalAParcelar: saldoLiq, creditoClienteTroca: 0 };
+    }
+
+    // Modo padrão: Saldo devedor anterior + nova compra - abatimento manual/desconto - entrada
+    const saldoPadrao = Math.max(
+      0,
+      saldoAnteriorDevedor + valorNovaCompraNum - valorAbatimentoManualNum - valorEntradaUnificacaoNum
+    );
+    return { saldoFinalAParcelar: saldoPadrao, creditoClienteTroca: 0 };
+  }, [
+    tipoAjusteUnificacao,
+    valorNovoOculosNum,
+    valorJaPagoAbaterNum,
+    valorEntradaUnificacaoNum,
+    saldoAnteriorDevedor,
+    valorNovaCompraNum,
+    valorAbatimentoManualNum,
+  ]);
 
   // Divisão das novas parcelas da unificação (centavo a centavo)
   const parcelasUnificadasCalculadas = useMemo(() => {
@@ -483,12 +545,23 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   }
 
   async function submitUnificacao() {
-    if (parcelasParaUnificar.length === 0 && valorNovaCompraNum <= 0) {
-      setErr("Selecione ao menos uma parcela em aberto ou informe o valor de uma nova compra.");
+    if (tipoAjusteUnificacao === "troca_menor_valor") {
+      if (valorNovoOculosNum <= 0) {
+        setErr("Informe o valor total do novo óculos.");
+        return;
+      }
+      if (saldoFinalAParcelar <= 0 && creditoClienteTroca > 0) {
+        setErr(`O valor já pago (${money(valorJaPagoAbaterNum)}) cobre todo o novo óculos (${money(valorNovoOculosNum)}). O cliente possui um crédito/troco de ${money(creditoClienteTroca)}. Não há saldo devedor a reparcelar.`);
+        return;
+      }
+    }
+
+    if (parcelasParaUnificar.length === 0 && valorNovaCompraNum <= 0 && valorNovoOculosNum <= 0) {
+      setErr("Selecione ao menos uma parcela em aberto ou informe o valor do novo óculos / nova compra.");
       return;
     }
     if (saldoFinalAParcelar <= 0) {
-      setErr("O saldo final a parcelar deve ser maior que zero (a entrada não pode cobrir todo o valor).");
+      setErr("O saldo final a parcelar deve ser maior que zero (a entrada ou abatimento não pode cobrir todo o valor).");
       return;
     }
     if (!vencimentoUnificacao) {
@@ -497,13 +570,22 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
     }
 
     const confirmou = window.confirm(
-      `Confirmar unificação e novo parcelamento para ${n.trim()}?\n\n` +
-      `• Saldo em aberto anterior: ${money(saldoAnteriorDevedor)} (${parcelasParaUnificar.length} parcela(s) selecionada(s))\n` +
-      (valorNovaCompraNum > 0 ? `• Nova compra adicionada: + ${money(valorNovaCompraNum)}\n` : "") +
-      (valorEntradaUnificacaoNum > 0 ? `• Entrada recebida no ato: - ${money(valorEntradaUnificacaoNum)}\n` : "") +
-      `• Novo saldo a parcelar: ${money(saldoFinalAParcelar)} em ${qtdParcelasUnificacao}x de aprox. ${money(Math.round(saldoFinalAParcelar / qtdParcelasUnificacao))}\n` +
-      `• 1º vencimento: ${dt(vencimentoUnificacao)}\n\n` +
-      `As parcelas anteriores selecionadas serão baixadas e ${qtdParcelasUnificacao} novas parcelas serão geradas com registro no histórico.`
+      tipoAjusteUnificacao === "troca_menor_valor"
+        ? `Confirmar TROCA POR ÓCULOS DE MENOR VALOR e novo parcelamento para ${n.trim()}?\n\n` +
+          `• Valor do novo óculos: ${money(valorNovoOculosNum)}\n` +
+          `• Abatimento do que já foi pago: - ${money(valorJaPagoAbaterNum)}\n` +
+          (valorEntradaUnificacaoNum > 0 ? `• Entrada no ato (dinheiro/Pix): - ${money(valorEntradaUnificacaoNum)}\n` : "") +
+          `• Novo saldo a reparcelar: ${money(saldoFinalAParcelar)} em ${qtdParcelasUnificacao}x de aprox. ${money(Math.round(saldoFinalAParcelar / qtdParcelasUnificacao))}\n` +
+          `• 1º vencimento: ${dt(vencimentoUnificacao)}\n\n` +
+          `As ${parcelasParaUnificar.length} parcelas em aberto anteriores serão baixadas por motivo de troca e ${qtdParcelasUnificacao} novas parcelas serão geradas.`
+        : `Confirmar unificação e novo parcelamento para ${n.trim()}?\n\n` +
+          `• Saldo em aberto anterior: ${money(saldoAnteriorDevedor)} (${parcelasParaUnificar.length} parcela(s) selecionada(s))\n` +
+          (valorNovaCompraNum > 0 ? `• Nova compra adicionada: + ${money(valorNovaCompraNum)}\n` : "") +
+          (valorAbatimentoManualNum > 0 ? `• Abatimento / Desconto aplicado: - ${money(valorAbatimentoManualNum)}\n` : "") +
+          (valorEntradaUnificacaoNum > 0 ? `• Entrada recebida no ato: - ${money(valorEntradaUnificacaoNum)}\n` : "") +
+          `• Novo saldo a parcelar: ${money(saldoFinalAParcelar)} em ${qtdParcelasUnificacao}x de aprox. ${money(Math.round(saldoFinalAParcelar / qtdParcelasUnificacao))}\n` +
+          `• 1º vencimento: ${dt(vencimentoUnificacao)}\n\n` +
+          `As parcelas anteriores selecionadas serão baixadas e ${qtdParcelasUnificacao} novas parcelas serão geradas com registro no histórico.`
     );
     if (!confirmou) return;
 
@@ -516,7 +598,9 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       const operadorId = userData?.user?.id || null;
       const agoraIso = new Date().toISOString();
       const titulosAntigosIds = parcelasParaUnificar.map(pRow => pRow.id);
-      const detalhesAcordo = `Unificação e reparcelamento em ${qtdParcelasUnificacao}x realizado em ${new Date().toLocaleDateString("pt-BR")}. Saldo devedor anterior: ${money(saldoAnteriorDevedor)}, nova compra: ${money(valorNovaCompraNum)}, entrada: ${money(valorEntradaUnificacaoNum)}, novo total: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`;
+      const detalhesAcordo = tipoAjusteUnificacao === "troca_menor_valor"
+        ? `Troca por óculos de menor valor em ${qtdParcelasUnificacao}x realizada em ${new Date().toLocaleDateString("pt-BR")}. Valor do novo óculos: ${money(valorNovoOculosNum)}, abatimento do já pago: ${money(valorJaPagoAbaterNum)}, entrada no ato: ${money(valorEntradaUnificacaoNum)}, novo saldo reparcelado: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`
+        : `Unificação e reparcelamento em ${qtdParcelasUnificacao}x realizado em ${new Date().toLocaleDateString("pt-BR")}. Saldo devedor anterior: ${money(saldoAnteriorDevedor)}, nova compra: ${money(valorNovaCompraNum)}, abatimento/desconto: ${money(valorAbatimentoManualNum)}, entrada: ${money(valorEntradaUnificacaoNum)}, novo total: ${money(saldoFinalAParcelar)}. ${obsUnificacao.trim()}`;
 
       // 1. Baixar as parcelas antigas selecionadas
       for (const pRow of parcelasParaUnificar) {
@@ -534,9 +618,12 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
           operador: operadorEmail,
           detalhes: detalhesAcordo,
           acordo: {
-            tipo: "REPACTUACAO_BAIXA",
+            tipo: tipoAjusteUnificacao === "troca_menor_valor" ? "TROCA_PRODUTO_MENOR_VALOR" : "REPACTUACAO_BAIXA",
             parcelasQtd: qtdParcelasUnificacao,
             saldoTotalAnterior: saldoAnteriorDevedor,
+            novoOculos: tipoAjusteUnificacao === "troca_menor_valor" ? valorNovoOculosNum : undefined,
+            jaPagoAbatido: tipoAjusteUnificacao === "troca_menor_valor" ? valorJaPagoAbaterNum : undefined,
+            abatimento: valorAbatimentoManualNum > 0 ? valorAbatimentoManualNum : undefined,
             novaCompra: valorNovaCompraNum,
             entrada: valorEntradaUnificacaoNum,
             novoSaldo: saldoFinalAParcelar,
@@ -569,7 +656,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       }
 
       // 2. Gerar as novas promissórias
-      const loteId = `UNIF_${Date.now()}`;
+      const loteId = tipoAjusteUnificacao === "troca_menor_valor" ? `TROCA_${Date.now()}` : `UNIF_${Date.now()}`;
       const novasPayload = parcelasUnificadasCalculadas.map(item => ({
         cliente_nome: n.trim(),
         telefone: p.trim(),
@@ -582,13 +669,16 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             data: agoraIso,
             valor: 0,
             operador: operadorEmail,
-            detalhes: `Promissória gerada por unificação/reparcelamento (${item.parcela}). ${detalhesAcordo}`,
+            detalhes: `Promissória gerada por ${tipoAjusteUnificacao === "troca_menor_valor" ? "troca de óculos" : "unificação/reparcelamento"} (${item.parcela}). ${detalhesAcordo}`,
             acordo: {
-              tipo: "NOVA_PARCELA_REPACTUADA",
+              tipo: tipoAjusteUnificacao === "troca_menor_valor" ? "NOVA_PARCELA_TROCA_PRODUTO" : "NOVA_PARCELA_REPACTUADA",
               loteId,
               numeroParcela: item.numero,
               totalParcelas: qtdParcelasUnificacao,
               saldoTotalAnterior: saldoAnteriorDevedor,
+              novoOculos: tipoAjusteUnificacao === "troca_menor_valor" ? valorNovoOculosNum : undefined,
+              jaPagoAbatido: tipoAjusteUnificacao === "troca_menor_valor" ? valorJaPagoAbaterNum : undefined,
+              abatimento: valorAbatimentoManualNum > 0 ? valorAbatimentoManualNum : undefined,
               novaCompra: valorNovaCompraNum,
               entrada: valorEntradaUnificacaoNum,
               titulosOriginais: titulosAntigosIds,
@@ -615,22 +705,28 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             operador_email: operadorEmail,
             operador_id: operadorId,
             data_pagamento: agoraIso,
-            detalhes: `Sinal de Entrada (${money(valorEntradaUnificacaoNum)}) recebido no ato da unificação/reparcelamento em ${qtdParcelasUnificacao}x.`,
+            detalhes: `Sinal de Entrada (${money(valorEntradaUnificacaoNum)}) recebido no ato da ${tipoAjusteUnificacao === "troca_menor_valor" ? "troca de produto" : "unificação"} em ${qtdParcelasUnificacao}x.`,
           });
         } catch (_) {}
       }
 
       setBusy(false);
       alert(
-        `✅ Unificação e novo parcelamento realizados com sucesso!\n\n` +
-        `• ${parcelasParaUnificar.length} parcela(s) antiga(s) quitada(s) por novação de dívida.\n` +
-        `• ${qtdParcelasUnificacao} nova(s) parcela(s) gerada(s).\n` +
-        `• Novo saldo total a receber: ${money(saldoFinalAParcelar)}.`
+        tipoAjusteUnificacao === "troca_menor_valor"
+          ? `✅ Troca por óculos de menor valor realizada com sucesso!\n\n` +
+            `• ${parcelasParaUnificar.length} parcela(s) antiga(s) baixada(s) por novação/troca.\n` +
+            `• Abatimento aplicado do que já foi pago: ${money(valorJaPagoAbaterNum)}.\n` +
+            `• ${qtdParcelasUnificacao} nova(s) parcela(s) gerada(s) totalizando ${money(saldoFinalAParcelar)}.\n` +
+            `• 1º vencimento: ${dt(vencimentoUnificacao)}.`
+          : `✅ Unificação e novo parcelamento realizados com sucesso!\n\n` +
+            `• ${parcelasParaUnificar.length} parcela(s) antiga(s) quitada(s) por novação de dívida.\n` +
+            `• ${qtdParcelasUnificacao} nova(s) parcela(s) gerada(s).\n` +
+            `• Novo saldo total a receber: ${money(saldoFinalAParcelar)}.`
       );
       onSaved();
     } catch (err: any) {
       setBusy(false);
-      setErr(err.message || "Erro desconhecido ao unificar parcelamento.");
+      setErr(err.message || "Erro desconhecido ao processar reparcelamento.");
     }
   }
 
@@ -751,7 +847,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         <h2 style={{ margin: 0 }}>
           {row
             ? modoEdicao === "compra_total"
-              ? "Unificar / Reparcelar Dívida Total"
+              ? (tipoAjusteUnificacao === "troca_menor_valor" ? "Troca por Menor Valor / Reparcelamento" : "Unificar / Reparcelar Dívida Total")
               : "Editar promissória"
             : "Nova promissória"}
         </h2>
@@ -1253,67 +1349,256 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               </div>
             </div>
 
-            {/* Bloco 2: Adicionar Nova Compra e Entrada */}
-            <div className="r2">
-              <label>
-                Adicionar nova compra (R$)
-                <input
-                  value={novaCompra}
-                  onChange={e => setNovaCompra(formatarMascaraMoeda(e.target.value, true))}
-                  inputMode="numeric"
-                  placeholder="R$ 0,00 (Opcional)"
-                />
-                <span className="sub" style={{ fontSize: 10.5 }}>Se o cliente comprou produtos novos, informe o valor aqui.</span>
-              </label>
+            {/* Seletor de Tipo de Operação: Unificação/Ajuste Padrão vs Troca por Menor Valor */}
+            <div style={{ display: "flex", gap: 8, background: "var(--soft)", padding: 4, borderRadius: 8, border: "1px solid var(--line)" }}>
+              <button
+                type="button"
+                onClick={() => setTipoAjusteUnificacao("padrao")}
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  border: tipoAjusteUnificacao === "padrao" ? "1px solid var(--brand)" : "1px solid transparent",
+                  background: tipoAjusteUnificacao === "padrao" ? "var(--card)" : "transparent",
+                  color: tipoAjusteUnificacao === "padrao" ? "var(--brand)" : "var(--mut)",
+                  boxShadow: tipoAjusteUnificacao === "padrao" ? "0 2px 4px rgba(0,0,0,0.06)" : "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                <span>⚖️</span>
+                <span>Unificação Padrão / Ajustar Saldo</span>
+              </button>
 
-              <label>
-                Valor pago de entrada / sinal (R$)
-                <input
-                  value={entradaUnificacao}
-                  onChange={e => setEntradaUnificacao(formatarMascaraMoeda(e.target.value, true))}
-                  inputMode="numeric"
-                  placeholder="R$ 0,00 (Opcional)"
-                />
-                <span className="sub" style={{ fontSize: 10.5 }}>Valor recebido em dinheiro ou Pix no ato da unificação.</span>
-              </label>
+              <button
+                type="button"
+                onClick={() => setTipoAjusteUnificacao("troca_menor_valor")}
+                style={{
+                  flex: 1,
+                  padding: "7px 10px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  borderRadius: 6,
+                  border: tipoAjusteUnificacao === "troca_menor_valor" ? "1px solid #0284c7" : "1px solid transparent",
+                  background: tipoAjusteUnificacao === "troca_menor_valor" ? "var(--card)" : "transparent",
+                  color: tipoAjusteUnificacao === "troca_menor_valor" ? "#0284c7" : "var(--mut)",
+                  boxShadow: tipoAjusteUnificacao === "troca_menor_valor" ? "0 2px 4px rgba(0,0,0,0.06)" : "none",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 6,
+                }}
+              >
+                <span>🔄</span>
+                <span>Troca por Óculos de Menor Valor</span>
+              </button>
             </div>
+
+            {/* Bloco 2: Inputs conforme o tipo selecionado */}
+            {tipoAjusteUnificacao === "troca_menor_valor" ? (
+              <div
+                style={{
+                  background: "rgba(2, 132, 199, 0.05)",
+                  border: "1.5px solid rgba(2, 132, 199, 0.35)",
+                  borderRadius: 10,
+                  padding: "12px 14px",
+                  display: "grid",
+                  gap: 10,
+                }}
+              >
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                  <div style={{ fontWeight: 700, fontSize: 13, color: "#0369a1", display: "flex", alignItems: "center", gap: 6 }}>
+                    <span>👓</span>
+                    <span>Troca de Produto: Abater o já pago e reparcelar o novo óculos</span>
+                  </div>
+                  {valorPagoDetectadoCompra > 0 && (
+                    <span style={{ fontSize: 11, background: "rgba(21, 128, 61, 0.12)", color: "#15803d", padding: "2px 8px", borderRadius: 6, fontWeight: 700 }}>
+                      ✓ Já pago identificado: {money(valorPagoDetectadoCompra)}
+                    </span>
+                  )}
+                </div>
+
+                <div className="r2">
+                  <label>
+                    <span style={{ color: "var(--ink)", fontWeight: 700 }}>Valor do NOVO óculos (R$) *</span>
+                    <input
+                      value={valorNovoOculos}
+                      onChange={e => setValorNovoOculos(formatarMascaraMoeda(e.target.value, true))}
+                      inputMode="numeric"
+                      placeholder="R$ 0,00"
+                      style={{ borderColor: "#0284c7", fontWeight: 700, fontSize: 14 }}
+                      autoFocus
+                    />
+                    <span className="sub" style={{ fontSize: 10.5 }}>Preço de venda do óculos de menor valor.</span>
+                  </label>
+
+                  <label>
+                    <span style={{ color: "var(--ink)", fontWeight: 700 }}>Valor já pago a abater (R$)</span>
+                    <input
+                      value={valorJaPagoAbater}
+                      onChange={e => setValorJaPagoAbater(formatarMascaraMoeda(e.target.value, true))}
+                      inputMode="numeric"
+                      placeholder="R$ 0,00"
+                    />
+                    <span className="sub" style={{ fontSize: 10.5 }}>Valor das parcelas já pagas a descontar do novo óculos.</span>
+                  </label>
+                </div>
+
+                <label>
+                  Valor pago de entrada / sinal no ato da troca (R$)
+                  <input
+                    value={entradaUnificacao}
+                    onChange={e => setEntradaUnificacao(formatarMascaraMoeda(e.target.value, true))}
+                    inputMode="numeric"
+                    placeholder="R$ 0,00 (Opcional)"
+                  />
+                  <span className="sub" style={{ fontSize: 10.5 }}>Se o cliente pagar algum sinal adicional em dinheiro ou Pix hoje.</span>
+                </label>
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+                <label>
+                  Adicionar nova compra (R$)
+                  <input
+                    value={novaCompra}
+                    onChange={e => setNovaCompra(formatarMascaraMoeda(e.target.value, true))}
+                    inputMode="numeric"
+                    placeholder="R$ 0,00 (Opcional)"
+                  />
+                  <span className="sub" style={{ fontSize: 10.5 }}>Aumentar dívida (produtos novos).</span>
+                </label>
+
+                <label>
+                  Abatimento / Desconto (R$)
+                  <input
+                    value={abatimentoManual}
+                    onChange={e => setAbatimentoManual(formatarMascaraMoeda(e.target.value, true))}
+                    inputMode="numeric"
+                    placeholder="R$ 0,00 (Opcional)"
+                  />
+                  <span className="sub" style={{ fontSize: 10.5 }}>Diminuir valor da dívida.</span>
+                </label>
+
+                <label>
+                  Entrada / Sinal (R$)
+                  <input
+                    value={entradaUnificacao}
+                    onChange={e => setEntradaUnificacao(formatarMascaraMoeda(e.target.value, true))}
+                    inputMode="numeric"
+                    placeholder="R$ 0,00 (Opcional)"
+                  />
+                  <span className="sub" style={{ fontSize: 10.5 }}>Recebido no ato (dinheiro/Pix).</span>
+                </label>
+              </div>
+            )}
 
             {/* Bloco 3: Card de Resumo da Nova Dívida Total */}
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
-                gap: 10,
-                padding: "10px 14px",
-                borderRadius: 10,
-                background: "var(--card)",
-                border: "1.5px solid var(--line)",
-              }}
-            >
-              <div>
-                <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Saldo Devedor Anterior</div>
-                <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{money(saldoAnteriorDevedor)}</div>
-              </div>
-
-              {valorNovaCompraNum > 0 && (
+            {tipoAjusteUnificacao === "troca_menor_valor" ? (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                  gap: 10,
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: "var(--card)",
+                  border: "1.5px solid #0284c7",
+                }}
+              >
                 <div>
-                  <div style={{ fontSize: 11, color: "var(--brand)", textTransform: "uppercase" }}>+ Nova Compra</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brand)" }}>+ {money(valorNovaCompraNum)}</div>
+                  <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Novo Óculos</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{money(valorNovoOculosNum)}</div>
                 </div>
-              )}
 
-              {valorEntradaUnificacaoNum > 0 && (
                 <div>
-                  <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase" }}>- Entrada Recebida</div>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>- {money(valorEntradaUnificacaoNum)}</div>
+                  <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase" }}>- Já Pago Abatido</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>- {money(valorJaPagoAbaterNum)}</div>
                 </div>
-              )}
 
-              <div style={{ borderLeft: "2px solid var(--line)", paddingLeft: 10 }}>
-                <div style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, textTransform: "uppercase" }}>TOTAL A REPARCELAR</div>
-                <div style={{ fontSize: 17, fontWeight: 900, color: "var(--brand)" }}>{money(saldoFinalAParcelar)}</div>
+                {valorEntradaUnificacaoNum > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase" }}>- Entrada no Ato</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>- {money(valorEntradaUnificacaoNum)}</div>
+                  </div>
+                )}
+
+                <div style={{ borderLeft: "2px solid var(--line)", paddingLeft: 10 }}>
+                  <div style={{ fontSize: 11, color: "#0284c7", fontWeight: 700, textTransform: "uppercase" }}>SALDO A REPARCELAR</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: "#0284c7" }}>{money(saldoFinalAParcelar)}</div>
+                </div>
               </div>
-            </div>
+            ) : (
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                  gap: 10,
+                  padding: "10px 14px",
+                  borderRadius: 10,
+                  background: "var(--card)",
+                  border: "1.5px solid var(--line)",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 11, color: "var(--mut)", textTransform: "uppercase" }}>Saldo Anterior</div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: "var(--ink)" }}>{money(saldoAnteriorDevedor)}</div>
+                </div>
+
+                {valorNovaCompraNum > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "var(--brand)", textTransform: "uppercase" }}>+ Nova Compra</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "var(--brand)" }}>+ {money(valorNovaCompraNum)}</div>
+                  </div>
+                )}
+
+                {valorAbatimentoManualNum > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "#dc2626", textTransform: "uppercase" }}>- Abatimento</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#dc2626" }}>- {money(valorAbatimentoManualNum)}</div>
+                  </div>
+                )}
+
+                {valorEntradaUnificacaoNum > 0 && (
+                  <div>
+                    <div style={{ fontSize: 11, color: "#16a34a", textTransform: "uppercase" }}>- Entrada</div>
+                    <div style={{ fontSize: 14, fontWeight: 700, color: "#16a34a" }}>- {money(valorEntradaUnificacaoNum)}</div>
+                  </div>
+                )}
+
+                <div style={{ borderLeft: "2px solid var(--line)", paddingLeft: 10 }}>
+                  <div style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700, textTransform: "uppercase" }}>TOTAL A REPARCELAR</div>
+                  <div style={{ fontSize: 17, fontWeight: 900, color: "var(--brand)" }}>{money(saldoFinalAParcelar)}</div>
+                </div>
+              </div>
+            )}
+
+            {/* Aviso se o cliente tiver crédito/troco a favor */}
+            {creditoClienteTroca > 0 && (
+              <div
+                style={{
+                  background: "rgba(234, 179, 8, 0.12)",
+                  border: "1.5px solid #eab308",
+                  color: "#854d0e",
+                  padding: "10px 14px",
+                  borderRadius: 8,
+                  fontSize: 12.5,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>⚠️</span>
+                <div>
+                  <b>Atenção:</b> O valor já pago ({money(valorJaPagoAbaterNum)}) é maior que o valor do novo óculos ({money(valorNovoOculosNum)}). O cliente quitou integralmente o novo produto e possui um <b>crédito/troco de {money(creditoClienteTroca)}</b> a ser devolvido ou utilizado na loja.
+                </div>
+              </div>
+            )}
 
             {/* Bloco 4: Novo Parcelamento (Qtd e 1º Vencimento) */}
             <div className="r2">
@@ -1395,7 +1680,11 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 <input
                   value={obsUnificacao}
                   onChange={e => setObsUnificacao(e.target.value)}
-                  placeholder="ex.: Cliente comprou nova armação e solicitou unificação do parcelamento"
+                  placeholder={
+                    tipoAjusteUnificacao === "troca_menor_valor"
+                      ? "ex.: Cliente trocou por óculos de menor valor, saldo recalculado abatendo o já pago"
+                      : "ex.: Cliente comprou nova armação e solicitou unificação do parcelamento"
+                  }
                   maxLength={250}
                 />
               </label>
@@ -1508,7 +1797,9 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               {busy
                 ? "Processando…"
                 : !isNova && modoEdicao === "compra_total"
-                ? `Confirmar e Reparcelar (${qtdParcelasUnificacao}x)`
+                ? (tipoAjusteUnificacao === "troca_menor_valor"
+                    ? `Confirmar Troca e Reparcelar (${qtdParcelasUnificacao}x)`
+                    : `Confirmar e Reparcelar (${qtdParcelasUnificacao}x)`)
                 : isNova && qtd > 1
                 ? `Salvar (${qtd} promissórias)`
                 : "Salvar"}
