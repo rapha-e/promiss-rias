@@ -267,7 +267,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
     return Array.from({ length: qtdParcelasUnificacao }, (_, idx) => {
       const num = idx + 1;
-      const valor = base + (idx === 0 ? resto : 0);
+      const valor = base + (idx < resto ? 1 : 0);
       const venc = somaMeses(vencimentoUnificacao, idx);
       const rotulo = qtdParcelasUnificacao === 1 ? "1X" : `${num}/${qtdParcelasUnificacao}`;
       return {
@@ -519,7 +519,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
     return Array.from({ length: qtd }, (_, idx) => {
       const num = idx + 1;
-      const valor = base + (idx === 0 ? resto : 0);
+      const valor = base + (idx < resto ? 1 : 0);
       const vencimento = d ? somaMeses(d, idx) : null;
       const rotulo = qtd === 1 ? "1X" : `${num}/${qtd}`;
 
@@ -2515,7 +2515,7 @@ export function BaixaDialog({
     const resto = saldoRestanteRateio % k;
 
     return parcelasRateio.map((item, idx) => {
-      const novoSaldo = base + (idx === 0 ? resto : 0);
+      const novoSaldo = base + (idx < resto ? 1 : 0);
       return {
         ...item,
         saldoAnterior: item.saldo_devedor,

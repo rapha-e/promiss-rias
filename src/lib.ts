@@ -234,7 +234,7 @@ export function gerarParcelasDesmembradas(r: Row): {
 
   const resultado = [];
   for (let i = 1; i <= total; i++) {
-    const valorParcela = base + (i === 1 ? resto : 0);
+    const valorParcela = base + (i <= resto ? 1 : 0);
     const pagoNesta = Math.min(valorParcela, Math.max(0, pagoRestante));
     pagoRestante -= pagoNesta;
     const saldo = valorParcela - pagoNesta;
@@ -647,7 +647,6 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
 
     const valorUnitario = c.valorParcela || carnetRows[0]?.divida_total || 0;
     const somaDividaReal = carnetRows.reduce((s, r) => s + (r.divida_total ?? 0), 0);
-    const dividaTotal = Math.max(somaDividaReal, denom * valorUnitario);
 
     // Identificar quais números de parcelas estão presentes
     const nums = carnetRows.map(r => parseInt((r.parcelas || "").match(/^(\d+)/)?.[1] || "0", 10)).filter(n => n > 0);
@@ -660,6 +659,11 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
     // Parcelas faltantes além do cadastrado
     const parcelasFaltantes = Math.max(0, denom - carnetRows.length - parcelasAnterioresQuitadas);
     const saldoPosteriorAberto = parcelasFaltantes * valorUnitario;
+
+    // Se todas as parcelas do carnê estão presentes no sistema, o total é a soma real das parcelas
+    const dividaTotal = (parcelasAnterioresQuitadas === 0 && parcelasFaltantes === 0)
+      ? somaDividaReal
+      : (somaDividaReal + valorPagoAnterior + saldoPosteriorAberto);
 
     const saldoPresente = carnetRows.reduce((s, r) => s + (r.fundo_perdido ? 0 : (r.saldo_devedor ?? 0)), 0);
     const saldoDevedor = saldoPresente + saldoPosteriorAberto;
@@ -685,7 +689,8 @@ export function separarComprasCliente(rows: Row[]): CompraGrupo[] {
       fundo_perdido: carnetRows.every(r => r.fundo_perdido),
     });
 
-    const valorFormatado = money(valorUnitario);
+    const valorUnitarioMedio = carnetRows.length > 0 ? Math.round(somaDividaReal / carnetRows.length) : valorUnitario;
+    const valorFormatado = money(valorUnitarioMedio);
     const titulo = `Carnê em ${denom}x (${valorFormatado}/mês)`;
 
     compras.push({

@@ -1389,7 +1389,7 @@ export default function RenegociacaoCobranca({
                     const restoCentavos = simulacao.saldoRestante % parcelasQtd;
 
                     for (let i = 1; i <= parcelasQtd; i++) {
-                      const valorDestaParcela = baseCentavos + (i === 1 ? restoCentavos : 0);
+                      const valorDestaParcela = baseCentavos + (i <= restoCentavos ? 1 : 0);
                       const d = new Date(primeiroVencRepactuacao + "T00:00:00Z");
                       d.setUTCMonth(d.getUTCMonth() + (i - 1));
                       const vencStr = d.toISOString().slice(0, 10);
