@@ -77,7 +77,7 @@ const TODOS_STATUS: { id: Status; label: string; desc: string; cor: string; bg: 
   { id: "PAGANDO", label: "Pagando", desc: "Com pagamentos parciais registrados", cor: "var(--warn)", bg: "rgba(217, 119, 6, 0.12)" },
   { id: "NÃO PAGOU", label: "Não pagou", desc: "Vencido e pendente de pagamento", cor: "var(--bad)", bg: "rgba(180, 35, 24, 0.12)" },
   { id: "FUNDO PERDIDO", label: "Fundo perdido", desc: "Promissórias baixadas / inadimplência", cor: "#64748b", bg: "rgba(100, 116, 139, 0.15)" },
-  { id: "QUITADO", label: "Quitado", desc: "Dívida 100% paga e liquidada", cor: "var(--brand)", bg: "rgba(10, 124, 76, 0.12)" },
+  { id: "QUITADO", label: "Quitado", desc: "Dívida 100% paga e liquidada", cor: "#10b981", bg: "rgba(16, 185, 129, 0.14)" },
 ];
 
 export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
@@ -899,7 +899,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         {chips.map(([k, l, n]) => (
           <button
             key={k}
-            className={`chip ${status === k && statusMultiplos.length === 0 ? "on" : ""}`}
+            className={`chip ${status === k && statusMultiplos.length === 0 ? "on" : ""} ${k ? `chip-${cls(k as Status)}` : "chip-todas"}`}
             onClick={() => {
               setStatusMultiplos([]);
               setStatus(k);
