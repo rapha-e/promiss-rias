@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, cls, deriveStatus, dt, hoje, diffDias, mensagemCobranca, money, baixarCSV, extrairInfoParcelas,
-  agruparClientesParaListagem,
+  agruparClientesParaListagem, obterPromessasPagamento,
 } from "./lib";
 import type { Row, Status, ClienteConsolidado } from "./lib";
 import { Editor, FichaCliente, PerdidoDialog, StatusPill, VencCell, WhatsDialog, BaixaDialog, LogDialog, DesmembrarDialog, VarreduraParcelasDialog } from "./Dialogs";
@@ -123,6 +123,62 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
   const [nomesFiltrados, setNomesFiltrados] = useState<string[] | null>(null);
   const [promissoriasFiltroMap, setPromissoriasFiltroMap] = useState<Map<string, Row>>(new Map());
+  const [promessasAtivasMap, setPromessasAtivasMap] = useState<Map<string, { id: string; dataPromessa: string; valor: number; observacao?: string }>>(new Map());
+
+  const carregarPromessasAtivas = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("promessas_pagamento")
+        .select("id, cliente, data_promessa, valor, observacao, cumprida")
+        .eq("cumprida", false)
+        .order("data_promessa", { ascending: true });
+
+      const mapa = new Map<string, { id: string; dataPromessa: string; valor: number; observacao?: string }>();
+
+      if (!error && data && data.length > 0) {
+        for (const item of data) {
+          const k = (item.cliente || "").trim().toUpperCase();
+          if (k && !mapa.has(k)) {
+            mapa.set(k, {
+              id: String(item.id),
+              dataPromessa: item.data_promessa ? String(item.data_promessa).slice(0, 10) : "",
+              valor: Number(item.valor) || 0,
+              observacao: item.observacao || undefined,
+            });
+          }
+        }
+      } else {
+        const locais = obterPromessasPagamento().filter(p => !p.cumprida);
+        for (const item of locais) {
+          const k = (item.cliente || "").trim().toUpperCase();
+          if (k && !mapa.has(k)) {
+            mapa.set(k, {
+              id: item.id,
+              dataPromessa: item.dataPromessa,
+              valor: item.valor,
+              observacao: item.observacao,
+            });
+          }
+        }
+      }
+      setPromessasAtivasMap(mapa);
+    } catch {
+      const locais = obterPromessasPagamento().filter(p => !p.cumprida);
+      const mapa = new Map<string, { id: string; dataPromessa: string; valor: number; observacao?: string }>();
+      for (const item of locais) {
+        const k = (item.cliente || "").trim().toUpperCase();
+        if (k && !mapa.has(k)) {
+          mapa.set(k, {
+            id: item.id,
+            dataPromessa: item.dataPromessa,
+            valor: item.valor,
+            observacao: item.observacao,
+          });
+        }
+      }
+      setPromessasAtivasMap(mapa);
+    }
+  }, []);
 
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
@@ -542,7 +598,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   useEffect(() => { loadResumo(); }, [loadResumo]);
   useEffect(() => { loadRows(); }, [loadRows]);
   useEffect(() => { loadProjecaoPeriodo(); }, [loadProjecaoPeriodo]);
-  const refresh = () => { loadRows(); loadResumo(); loadProjecaoPeriodo(); };
+  useEffect(() => { carregarPromessasAtivas(); }, [carregarPromessasAtivas]);
+  const refresh = () => { loadRows(); loadResumo(); loadProjecaoPeriodo(); carregarPromessasAtivas(); };
 
   const pages = Math.max(1, Math.ceil(count / PS));
   const st = resumo?.status;
@@ -1627,6 +1684,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                     ano: null,
                   });
 
+              const promessaAtiva = promessasAtivasMap.get(cliKey);
+
               return (
                 <tr key={cli.cliente_nome}>
                   <td className={`s-${cls(cli.status)}`}>
@@ -1690,6 +1749,28 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                           title={`Atenção: Este cliente possui ${cli.qtdComprasAbertas} compras/parcelamentos em aberto. Clique no cliente para ver cada compra separada.`}
                         >
                           ⚠️ {cli.qtdComprasAbertas} compras em aberto
+                        </span>
+                      )}
+                      {promessaAtiva && (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: 99,
+                            background: "rgba(234, 179, 8, 0.15)",
+                            color: "#a16207",
+                            border: "1.5px solid #eab308",
+                            whiteSpace: "nowrap",
+                            cursor: "pointer",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: 4,
+                          }}
+                          onClick={() => setFichaCliente({ cliente: cli.cliente_nome, telefone: cli.telefone })}
+                          title={`Promessa de Pagamento: Agendado para ${dt(promessaAtiva.dataPromessa)}${promessaAtiva.valor > 0 ? ` no valor de ${money(promessaAtiva.valor)}` : ""}${promessaAtiva.observacao ? ` - Obs: ${promessaAtiva.observacao}` : ""}`}
+                        >
+                          📌 Promessa: {dt(promessaAtiva.dataPromessa).slice(0, 5)} {promessaAtiva.valor > 0 ? `(${money(promessaAtiva.valor)})` : ""}
                         </span>
                       )}
                     </div>

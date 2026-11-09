@@ -8,6 +8,7 @@ import {
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses, ajustarApenasDia,
   identificarCompraAtual, separarComprasCliente,
   formatarMascaraMoeda, desmascararMoeda, ehRepactuada,
+  obterPromessasPagamento, marcarPromessaCumprida,
 } from "./lib";
 import type { Row, CreditScoreInfo, CompraGrupo } from "./lib";
 import { SortIcon } from "./SortIcon";
@@ -2010,6 +2011,19 @@ export function WhatsDialog({
     if (houveAlteracaoTel) {
       salvarTelefoneNoBanco(telInput);
     }
+    // Trilha de auditoria da cobrança (P1.1 e P1.4 da Auditoria)
+    try {
+      supabase.auth.getUser().then(({ data: userData }) => {
+        supabase.from("cobranca_interacoes").insert({
+          cliente_nome: nome,
+          telefone: telInput,
+          canal: "WHATSAPP",
+          mensagem: msg,
+          usuario_id: userData?.user?.id || null,
+          usuario_email: userData?.user?.email || null,
+        }).then(() => {});
+      });
+    } catch (_) {}
   };
 
   return (
@@ -2106,12 +2120,75 @@ export function FichaCliente({
   const [editandoTelFicha, setEditandoTelFicha] = useState(false);
   const [novoTelFicha, setNovoTelFicha] = useState("");
   const [salvandoTelFicha, setSalvandoTelFicha] = useState(false);
+  const [promessaAtiva, setPromessaAtiva] = useState<{ id: string; dataPromessa: string; valor: number; observacao?: string } | null>(null);
+
+  const carregarPromessaAtiva = useCallback(async () => {
+    try {
+      const { data: promData } = await supabase
+        .from("promessas_pagamento")
+        .select("id, cliente, data_promessa, valor, observacao, cumprida")
+        .ilike("cliente", cliente)
+        .eq("cumprida", false)
+        .order("data_promessa", { ascending: true })
+        .limit(1);
+
+      if (promData && promData.length > 0) {
+        setPromessaAtiva({
+          id: String(promData[0].id),
+          dataPromessa: promData[0].data_promessa ? String(promData[0].data_promessa).slice(0, 10) : "",
+          valor: Number(promData[0].valor) || 0,
+          observacao: promData[0].observacao || undefined,
+        });
+      } else {
+        const locais = obterPromessasPagamento().filter(
+          p => !p.cumprida && p.cliente.trim().toUpperCase() === cliente.trim().toUpperCase()
+        );
+        if (locais.length > 0) {
+          setPromessaAtiva({
+            id: locais[0].id,
+            dataPromessa: locais[0].dataPromessa,
+            valor: locais[0].valor,
+            observacao: locais[0].observacao,
+          });
+        } else {
+          setPromessaAtiva(null);
+        }
+      }
+    } catch {
+      const locais = obterPromessasPagamento().filter(
+        p => !p.cumprida && p.cliente.trim().toUpperCase() === cliente.trim().toUpperCase()
+      );
+      if (locais.length > 0) {
+        setPromessaAtiva({
+          id: locais[0].id,
+          dataPromessa: locais[0].dataPromessa,
+          valor: locais[0].valor,
+          observacao: locais[0].observacao,
+        });
+      } else {
+        setPromessaAtiva(null);
+      }
+    }
+  }, [cliente]);
+
+  const handleCumprirPromessa = async (promId: string) => {
+    try {
+      await supabase
+        .from("promessas_pagamento")
+        .update({ cumprida: true, cumprida_em: new Date().toISOString() })
+        .eq("id", promId);
+    } catch (_) {}
+    marcarPromessaCumprida(promId);
+    setPromessaAtiva(null);
+    onChanged?.();
+  };
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc("cliente_promissorias", { p_cliente: cliente });
     if (error) setErr(error.message);
     else setRows((data ?? []) as Row[]);
-  }, [cliente]);
+    carregarPromessaAtiva();
+  }, [cliente, carregarPromessaAtiva]);
 
   useEffect(() => {
     load();
@@ -2313,6 +2390,41 @@ export function FichaCliente({
           <button className="btn ghost" onClick={onClose}>Fechar</button>
         </div>
         {err && <div className="err">{err}</div>}
+
+        {promessaAtiva && (
+          <div style={{
+            padding: "10px 14px",
+            background: "rgba(234, 179, 8, 0.12)",
+            border: "1.5px solid #eab308",
+            borderRadius: 8,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 10,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 20 }}>📌</span>
+              <div>
+                <b style={{ color: "#a16207", fontSize: 13 }}>Promessa de Pagamento Registrada</b>
+                <div style={{ fontSize: 12, color: "var(--ink)", marginTop: 2 }}>
+                  Agendado para <b>{dt(promessaAtiva.dataPromessa)}</b>
+                  {promessaAtiva.valor > 0 && <> no valor de <b>{money(promessaAtiva.valor)}</b></>}
+                  {promessaAtiva.observacao && <> · <i>"{promessaAtiva.observacao}"</i></>}
+                </div>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="btn"
+              style={{ fontSize: 11, padding: "5px 12px", background: "#16a34a", color: "#fff", border: "none", fontWeight: 700 }}
+              onClick={() => handleCumprirPromessa(promessaAtiva.id)}
+              title="Marcar esta promessa de pagamento como cumprida"
+            >
+              ✓ Marcar como Cumprida
+            </button>
+          </div>
+        )}
 
         {comprasAbertas.length > 1 && (
           <div style={{ padding: "8px 12px", background: "#fef3c7", borderRadius: 8, border: "1px solid #fde68a", fontSize: 12, color: "#92400e", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

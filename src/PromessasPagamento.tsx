@@ -66,7 +66,7 @@ export default function PromessasPagamento() {
               });
             }
           }
-          try { localStorage.removeItem("leooticas_promessas_pagamento"); } catch (_) {}
+          try { localStorage.removeItem("leooticas_promessas_pagamento"); } catch (_) { }
           // Recarrega consolidadas do Supabase
           const { data: recarregadas } = await supabase
             .from("promessas_pagamento")
@@ -90,7 +90,7 @@ export default function PromessasPagamento() {
         setPromessas(mapeadas);
         return;
       }
-    } catch (_) {}
+    } catch (_) { }
 
     // Fallback gracioso para localStorage
     setPromessas(obterPromessasPagamento());
@@ -217,7 +217,7 @@ export default function PromessasPagamento() {
         .from("promessas_pagamento")
         .update({ cumprida: novoStatus, cumprida_em: novoStatus ? new Date().toISOString() : null })
         .eq("id", p.id);
-    } catch (_) {}
+    } catch (_) { }
 
     // Sincroniza também no storage se existir
     if (novoStatus) {
@@ -225,7 +225,7 @@ export default function PromessasPagamento() {
     } else {
       const todas = obterPromessasPagamento();
       const atualizadas = todas.map(item => (item.id === p.id ? { ...item, cumprida: false } : item));
-      try { localStorage.setItem("leooticas_promessas_pagamento", JSON.stringify(atualizadas)); } catch (_) {}
+      try { localStorage.setItem("leooticas_promessas_pagamento", JSON.stringify(atualizadas)); } catch (_) { }
     }
     carregar();
   };
@@ -234,7 +234,7 @@ export default function PromessasPagamento() {
     if (confirm(`Deseja realmente excluir a promessa de ${p.cliente} para ${dt(p.dataPromessa)}?`)) {
       try {
         await supabase.from("promessas_pagamento").delete().eq("id", p.id);
-      } catch (_) {}
+      } catch (_) { }
       excluirPromessa(p.id);
       carregar();
     }
@@ -542,8 +542,8 @@ export default function PromessasPagamento() {
             {busca.trim()
               ? "Nenhum resultado corresponde à sua pesquisa."
               : filtroStatus !== "todas"
-              ? "Não há compromissos nesta categoria no momento."
-              : "Cadastre novas promessas acordadas com seus clientes para receber lembretes e manter o follow-up organizado."}
+                ? "Não há compromissos nesta categoria no momento."
+                : "Cadastre novas promessas acordadas com seus clientes para receber lembretes e manter o follow-up organizado."}
           </div>
           <button type="button" className="btn" onClick={() => setModalNovo(true)}>
             <span>➕</span> Agendar Primeira Promessa
@@ -653,8 +653,8 @@ export default function PromessasPagamento() {
                         {ehHoje
                           ? "Hoje!"
                           : atrasada
-                          ? "Vencida"
-                          : `Em ${Math.ceil((new Date(p.dataPromessa).getTime() - new Date(hojeIso).getTime()) / (1000 * 3600 * 24))} dias`}
+                            ? "Vencida"
+                            : `Em ${Math.ceil((new Date(p.dataPromessa).getTime() - new Date(hojeIso).getTime()) / (1000 * 3600 * 24))} dias`}
                       </div>
                     </td>
 

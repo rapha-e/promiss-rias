@@ -327,7 +327,27 @@ drop policy if exists "eventos: leitura" on public.promissoria_eventos;
 create policy "eventos: leitura" on public.promissoria_eventos
   for select to authenticated using (true);
 
--- 11. Permissões de Execução (Grants / Revokes)
+-- 12. Tabela de Interações e Trilha de Cobrança (P1.1 e P1.4 da Auditoria)
+create table if not exists public.cobranca_interacoes (
+  id bigint generated always as identity primary key,
+  cliente_nome text not null,
+  telefone text,
+  canal text not null default 'WHATSAPP' check (canal in ('WHATSAPP', 'LIGACAO', 'PRESENCIAL', 'OUTRO')),
+  mensagem text,
+  usuario_id uuid references auth.users (id) on delete set null,
+  usuario_email text,
+  created_at timestamptz not null default now()
+);
+
+alter table public.cobranca_interacoes enable row level security;
+drop policy if exists "cobranca_interacoes: leitura" on public.cobranca_interacoes;
+create policy "cobranca_interacoes: leitura" on public.cobranca_interacoes
+  for select to authenticated using (true);
+drop policy if exists "cobranca_interacoes: inserir" on public.cobranca_interacoes;
+create policy "cobranca_interacoes: inserir" on public.cobranca_interacoes
+  for insert to authenticated with check (true);
+
+-- 13. Permissões de Execução (Grants / Revokes)
 revoke execute on function public.promissorias_resumo() from public, anon;
 grant execute on function public.promissorias_resumo() to authenticated;
 
