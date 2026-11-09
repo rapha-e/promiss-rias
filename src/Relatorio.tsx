@@ -379,7 +379,7 @@ export default function Relatorio() {
           </tbody>
         </table>
       </div>
-      {whats && <WhatsDialog nome={whats.cliente_nome} telefone={whats.telefone} mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])} onClose={() => setWhats(null)} />}
+      {whats && <WhatsDialog nome={whats.cliente_nome} telefone={whats.telefone} mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])} onClose={() => setWhats(null)} onTelefoneAtualizado={() => load()} />}
       {fichaCliente && (
         <FichaCliente
           cliente={fichaCliente.cliente}

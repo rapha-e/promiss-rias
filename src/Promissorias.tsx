@@ -1690,7 +1690,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       </button>
                     )}
                     {!cli.fundo_perdido && cli.saldo_devedor > 0 && (
-                      <button className="ed" onClick={() => setWhats(refRow)} title="Cobrar por WhatsApp">
+                      <button
+                        className="ed"
+                        onClick={() => setWhats({ ...refRow, telefone: cli.telefone || refRow.telefone })}
+                        title="Cobrar por WhatsApp"
+                      >
                         Whats
                       </button>
                     )}
@@ -1751,7 +1755,15 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing !== undefined && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
-      {whats && <WhatsDialog nome={whats.cliente_nome} telefone={whats.telefone} mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])} onClose={() => setWhats(null)} />}
+      {whats && (
+        <WhatsDialog
+          nome={whats.cliente_nome}
+          telefone={whats.telefone}
+          mensagem={mensagemCobranca(whats.cliente_nome, [{ valor: whats.saldo_devedor, vencimento: whats.vencimento }])}
+          onClose={() => setWhats(null)}
+          onTelefoneAtualizado={() => refresh()}
+        />
+      )}
       {fichaCliente && (
         <FichaCliente
           cliente={fichaCliente.cliente}

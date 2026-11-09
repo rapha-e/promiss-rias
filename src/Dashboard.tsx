@@ -1714,6 +1714,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           telefone={whats.telefone}
           mensagem={`Olá, ${whats.cliente}! Passando para conversar sobre suas promissórias em aberto na LeoÓticas no valor total de ${money(whats.valor)}. Conseguimos uma condição especial para regularizar hoje. Podemos conversar?`}
           onClose={() => setWhats(null)}
+          onTelefoneAtualizado={() => carregarDados()}
         />
       )}
     </div>

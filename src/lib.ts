@@ -831,12 +831,16 @@ export function agruparClientesParaListagem(rows: Row[]): ClienteConsolidado[] {
     }
     const g = grupos.get(key)!;
     g.promissorias.push(r);
-    if (!g.tel && r.telefone) g.tel = r.telefone;
+    if (r.telefone && r.telefone.trim()) {
+      g.tel = r.telefone.trim();
+    }
   }
 
   const consolidados: ClienteConsolidado[] = [];
   for (const g of grupos.values()) {
-    consolidados.push(consolidarCliente(g.nome, g.tel, g.promissorias));
+    // Escolhe o telefone mais recente preenchido dentre as promissórias do cliente
+    const telMaisRecente = [...g.promissorias].reverse().find(p => p.telefone && p.telefone.trim())?.telefone?.trim() || g.tel;
+    consolidados.push(consolidarCliente(g.nome, telMaisRecente, g.promissorias));
   }
 
   return consolidados;

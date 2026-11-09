@@ -238,7 +238,7 @@ function Ficha({ c, isAdmin, onClose, onChanged }: { c: Cli; isAdmin: boolean; o
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
-      {whats && <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={mensagemCobranca(c.cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}
+      {whats && <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={mensagemCobranca(c.cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} onTelefoneAtualizado={() => refresh()} />}
     </Painel>
   );
 }
@@ -448,5 +448,5 @@ function CobrancaCliente({ c, onClose }: { c: Cli; onClose: () => void }) {
     });
   }, [c.cliente]);
   if (msg === null) return null;
-  return <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={msg} onClose={onClose} />;
+  return <WhatsDialog nome={c.cliente} telefone={c.telefone} mensagem={msg} onClose={onClose} onTelefoneAtualizado={() => onClose()} />;
 }

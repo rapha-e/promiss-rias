@@ -815,9 +815,13 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
     if (row) {
       // Edição de promissória existente
+      const nomeAntigo = (row.cliente_nome || "").trim();
+      const novoNome = n.trim();
+      const novoTel = p.trim();
+
       const payload = {
-        cliente_nome: n.trim(),
-        telefone: p.trim(),
+        cliente_nome: novoNome,
+        telefone: novoTel,
         divida_total: T,
         parcelas: i.trim(),
         valor_pago: G,
@@ -827,6 +831,25 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       if (error) {
         setBusy(false);
         return setErr("Não foi possível salvar: " + error.message);
+      }
+
+      // Sincroniza o telefone (e nome caso alterado) em TODAS as promissórias do cliente no banco
+      if (novoTel) {
+        try {
+          await supabase
+            .from("promissorias")
+            .update({ telefone: novoTel })
+            .ilike("cliente_nome", novoNome);
+
+          if (nomeAntigo && nomeAntigo.toUpperCase() !== novoNome.toUpperCase()) {
+            await supabase
+              .from("promissorias")
+              .update({ cliente_nome: novoNome, telefone: novoTel })
+              .ilike("cliente_nome", nomeAntigo);
+          }
+        } catch (eTel) {
+          console.warn("Aviso ao sincronizar telefone com outras promissórias:", eTel);
+        }
       }
 
       // Repercutir novo dia de vencimento em todas as parcelas do carnê (anteriores e posteriores, inclusive quitadas), mantendo meses e anos inalterados
@@ -1919,17 +1942,117 @@ export function PerdidoDialog({ row, onClose, onDone }: { row: Row; onClose: () 
 }
 
 /** Cobrança via link wa.me: o usuário revisa a mensagem e envia manualmente no WhatsApp. */
-export function WhatsDialog({ nome, telefone, mensagem, onClose }: { nome: string; telefone: string; mensagem: string; onClose: () => void }) {
+export function WhatsDialog({
+  nome,
+  telefone,
+  mensagem,
+  onClose,
+  onTelefoneAtualizado,
+}: {
+  nome: string;
+  telefone: string;
+  mensagem: string;
+  onClose: () => void;
+  onTelefoneAtualizado?: (novoTel: string) => void;
+}) {
   const [ddd, setDdd] = useState(getDDD());
   const [msg, setMsg] = useState(mensagem);
-  const nums = normalizarTelefones(telefone, ddd);
+  const [telInput, setTelInput] = useState(mascaraTelefone(telefone || ""));
+  const [salvandoTel, setSalvandoTel] = useState(false);
+  const [avisoSucessoTel, setAvisoSucessoTel] = useState("");
+
+  // Busca sempre o telefone mais recente salvo para este cliente no banco
+  useEffect(() => {
+    let cancel = false;
+    supabase
+      .from("promissorias")
+      .select("telefone, id")
+      .ilike("cliente_nome", nome)
+      .order("id", { ascending: false })
+      .limit(10)
+      .then(({ data }) => {
+        if (cancel || !data) return;
+        const telBanco = data.find(p => p.telefone && p.telefone.trim())?.telefone?.trim();
+        if (telBanco && telBanco !== telefone) {
+          setTelInput(mascaraTelefone(telBanco));
+        }
+      });
+    return () => { cancel = true; };
+  }, [nome, telefone]);
+
+  const salvarTelefoneNoBanco = async (novoTel: string) => {
+    const tLimpo = novoTel.trim();
+    if (!tLimpo || salvandoTel) return;
+    setSalvandoTel(true);
+    try {
+      await supabase
+        .from("promissorias")
+        .update({ telefone: tLimpo })
+        .ilike("cliente_nome", nome);
+      setAvisoSucessoTel("✓ Telefone atualizado em todas as promissórias do cliente!");
+      onTelefoneAtualizado?.(tLimpo);
+    } catch (e: any) {
+      console.warn("Erro ao salvar telefone via WhatsDialog:", e);
+    } finally {
+      setSalvandoTel(false);
+    }
+  };
+
+  const telAtualFormatado = telInput.trim();
+  const telOriginalFormatado = mascaraTelefone(telefone || "").trim();
+  const houveAlteracaoTel = telAtualFormatado !== "" && telAtualFormatado !== telOriginalFormatado;
+
+  const nums = normalizarTelefones(telInput, ddd);
   const [sel, setSel] = useState(0);
   const numero = nums[Math.min(sel, nums.length - 1)];
+
+  const handleAbrirWhatsApp = () => {
+    if (houveAlteracaoTel) {
+      salvarTelefoneNoBanco(telInput);
+    }
+  };
+
   return (
     <Painel onClose={onClose}>
       <div style={{ padding: 20, display: "grid", gap: 12 }}>
         <h2 style={{ margin: 0 }}>Cobrança por WhatsApp</h2>
-        <div><b>{nome}</b><div className="sub">Telefone cadastrado: {telefone || "—"}</div></div>
+        <div>
+          <b style={{ fontSize: 16 }}>{nome}</b>
+        </div>
+
+        <label>
+          Telefone do WhatsApp (editável)
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+            <input
+              type="tel"
+              value={telInput}
+              placeholder="(00) 00000-0000"
+              onChange={e => {
+                setTelInput(mascaraTelefone(e.target.value));
+                setAvisoSucessoTel("");
+              }}
+              style={{ flex: 1 }}
+            />
+            {houveAlteracaoTel && (
+              <button
+                type="button"
+                className="btn"
+                disabled={salvandoTel}
+                onClick={() => salvarTelefoneNoBanco(telInput)}
+                style={{ padding: "8px 12px", fontSize: 12, whiteSpace: "nowrap" }}
+                title="Salvar este telefone em todas as promissórias do cliente no sistema"
+              >
+                {salvandoTel ? "Salvando..." : "💾 Salvar cadastro"}
+              </button>
+            )}
+          </div>
+        </label>
+        {avisoSucessoTel && (
+          <div style={{ color: "#16a34a", fontSize: 12, fontWeight: 700 }}>
+            {avisoSucessoTel}
+          </div>
+        )}
+
         <label>DDD padrão (para números sem DDD)
           <input value={ddd} maxLength={2} inputMode="numeric" style={{ width: 80 }}
             onChange={e => { const v = e.target.value.replace(/\D/g, ""); setDdd(v); if (v.length === 2) setDDD(v); }} />
@@ -1942,14 +2065,14 @@ export function WhatsDialog({ nome, telefone, mensagem, onClose }: { nome: strin
           </label>
         )}
         {nums.length === 1 && <div className="sub">Enviar para <b className="mono">{formatarTelefone(nums[0])}</b></div>}
-        {!nums.length && <div className="err">Telefone inválido ou ausente. Corrija o cadastro para enviar.</div>}
+        {!nums.length && <div className="err">Telefone inválido ou ausente. Informe o número com DDD acima para enviar.</div>}
         <label>Mensagem (revise antes de enviar)
           <textarea rows={11} value={msg} onChange={e => setMsg(e.target.value)} />
         </label>
         <div className="r2">
           <button type="button" className="btn ghost" onClick={onClose}>Fechar</button>
           {numero
-            ? <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={linkWhatsApp(numero, msg)} target="_blank" rel="noopener noreferrer">Abrir WhatsApp</a>
+            ? <a className="btn" style={{ textAlign: "center", textDecoration: "none" }} href={linkWhatsApp(numero, msg)} target="_blank" rel="noopener noreferrer" onClick={handleAbrirWhatsApp}>Abrir WhatsApp</a>
             : <button className="btn" disabled>Abrir WhatsApp</button>}
         </div>
         <div className="sub">O WhatsApp abre com a mensagem pronta; o envio é feito por você.</div>
@@ -1980,6 +2103,9 @@ export function FichaCliente({
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
+  const [editandoTelFicha, setEditandoTelFicha] = useState(false);
+  const [novoTelFicha, setNovoTelFicha] = useState("");
+  const [salvandoTelFicha, setSalvandoTelFicha] = useState(false);
 
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc("cliente_promissorias", { p_cliente: cliente });
@@ -1991,7 +2117,25 @@ export function FichaCliente({
     load();
   }, [load]);
 
-  const tel = telefone || rows.find(r => r.telefone)?.telefone || "";
+  const tel = [...rows].reverse().find(r => r.telefone && r.telefone.trim())?.telefone?.trim() || telefone || "";
+
+  const salvarTelefoneFicha = async () => {
+    const limpo = novoTelFicha.trim();
+    if (!limpo || salvandoTelFicha) return;
+    setSalvandoTelFicha(true);
+    try {
+      await supabase
+        .from("promissorias")
+        .update({ telefone: limpo })
+        .ilike("cliente_nome", cliente);
+      setEditandoTelFicha(false);
+      refresh();
+    } catch (e: any) {
+      setErr("Erro ao atualizar telefone: " + (e.message || String(e)));
+    } finally {
+      setSalvandoTelFicha(false);
+    }
+  };
   const abertos = rows.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
   const comprasCliente = useMemo(() => separarComprasCliente(rows), [rows]);
   const comprasAbertas = useMemo(() => comprasCliente.filter(c => c.emAberto), [comprasCliente]);
@@ -2118,9 +2262,52 @@ export function FichaCliente({
                 </span>
               )}
             </div>
-            <div className="sub mono">
-              {tel || "Sem telefone"} · <span style={{ color: "var(--ink)", fontWeight: 500 }}>{score.recomendacaoVenda}</span>
+            <div className="sub mono" style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: 4 }}>
+              <span>{tel || "Sem telefone"}</span>
+              {isAdmin && !editandoTelFicha && (
+                <button
+                  type="button"
+                  className="link-cli"
+                  style={{ fontSize: 11, color: "var(--brand)", textDecoration: "underline" }}
+                  onClick={() => {
+                    setNovoTelFicha(mascaraTelefone(tel));
+                    setEditandoTelFicha(true);
+                  }}
+                  title="Atualizar telefone do cliente em todas as promissórias"
+                >
+                  ✏️ Alterar telefone
+                </button>
+              )}
+              · <span style={{ color: "var(--ink)", fontWeight: 500 }}>{score.recomendacaoVenda}</span>
             </div>
+            {editandoTelFicha && (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "6px 0", flexWrap: "wrap" }}>
+                <input
+                  type="tel"
+                  value={novoTelFicha}
+                  placeholder="(00) 00000-0000"
+                  onChange={e => setNovoTelFicha(mascaraTelefone(e.target.value))}
+                  style={{ padding: "4px 8px", fontSize: 13, width: 170 }}
+                />
+                <button
+                  className="btn"
+                  type="button"
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  disabled={salvandoTelFicha}
+                  onClick={salvarTelefoneFicha}
+                >
+                  {salvandoTelFicha ? "Salvando..." : "Salvar em todas as promissórias"}
+                </button>
+                <button
+                  className="btn ghost"
+                  type="button"
+                  style={{ padding: "4px 10px", fontSize: 12 }}
+                  onClick={() => setEditandoTelFicha(false)}
+                >
+                  Cancelar
+                </button>
+              </div>
+            )}
           </div>
           {abertos.length > 0 && <button className="btn" onClick={() => setWhats(true)}>Cobrar por WhatsApp</button>}
           <button className="btn ghost" onClick={onClose}>Fechar</button>
@@ -2367,7 +2554,7 @@ export function FichaCliente({
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
-      {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} />}
+      {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} onTelefoneAtualizado={() => refresh()} />}
     </Painel>
   );
 }
