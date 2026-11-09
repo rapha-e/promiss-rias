@@ -1967,20 +1967,22 @@ export function WhatsDialog({
   useEffect(() => {
     let cancel = false;
     const h = hoje();
-    supabase
-      .from("cobranca_interacoes")
-      .select("created_at, usuario_email")
-      .ilike("cliente_nome", nome)
-      .gte("created_at", `${h}T00:00:00`)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .then(({ data }) => {
+    const carregarUltimoContato = async () => {
+      try {
+        const { data } = await supabase
+          .from("cobranca_interacoes")
+          .select("created_at, usuario_email")
+          .ilike("cliente_nome", nome)
+          .gte("created_at", `${h}T00:00:00`)
+          .order("created_at", { ascending: false })
+          .limit(1);
         if (cancel || !data || data.length === 0) return;
         const d = new Date(data[0].created_at);
         const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
         setUltimoContatoHoje({ hora, email: data[0].usuario_email || undefined });
-      })
-      .catch(() => {});
+      } catch (_) {}
+    };
+    carregarUltimoContato();
     return () => { cancel = true; };
   }, [nome]);
 

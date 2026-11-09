@@ -1,8 +1,37 @@
-import { useEffect, useState, lazy, Suspense } from "react";
-import type { FormEvent } from "react";
+import { useEffect, useState, lazy, Suspense, Component } from "react";
+import type { FormEvent, ErrorInfo, ReactNode } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { configured, supabase } from "./supabase";
 import logo from "./logo.png";
+
+class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boolean; error: string }> {
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false, error: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error: error.message || String(error) };
+  }
+  componentDidCatch(error: Error, info: ErrorInfo) {
+    console.error("Erro capturado pelo ErrorBoundary:", error, info);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div style={{ padding: 40, textAlign: "center", display: "grid", gap: 12, maxWidth: 500, margin: "40px auto" }}>
+          <h3 style={{ color: "var(--bad)", margin: 0 }}>Ops, ocorreu um erro ao carregar este módulo</h3>
+          <div style={{ fontSize: 13, color: "var(--mut)" }}>{this.state.error}</div>
+          <div>
+            <button className="btn" type="button" onClick={() => { this.setState({ hasError: false }); window.location.reload(); }}>
+              Recarregar Sistema
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const Dashboard = lazy(() => import("./Dashboard"));
 const Promissorias = lazy(() => import("./Promissorias"));
@@ -76,13 +105,15 @@ function Shell({ session }: { session: Session }) {
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </nav>
       <main>
-        <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "var(--mut)", fontSize: 14 }}>Carregando módulo…</div>}>
-          {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
-          {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
-          {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
-          {tab === "renegociacao" && <RenegociacaoCobranca />}
-          {tab === "promessas" && <PromessasPagamento />}
-        </Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "var(--mut)", fontSize: 14 }}>Carregando módulo…</div>}>
+            {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
+            {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
+            {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
+            {tab === "renegociacao" && <RenegociacaoCobranca />}
+            {tab === "promessas" && <PromessasPagamento />}
+          </Suspense>
+        </ErrorBoundary>
       </main>
     </>
   );

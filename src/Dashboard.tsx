@@ -89,6 +89,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
   const [whats, setWhats] = useState<{ cliente: string; telefone: string; valor: number; vencimento?: string } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
+  const [promessas, setPromessas] = useState<PromessaPagamento[]>([]);
   const carregarPromessasDashboard = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -343,7 +344,11 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       setResumo(res);
       setAbertas(listaAbertas);
       setPerdidas(dadosPerdidos || []);
-      await carregarPromessasDashboard();
+      try {
+        await carregarPromessasDashboard();
+      } catch (_) {
+        setPromessas(obterPromessasPagamento());
+      }
     } catch (e: any) {
       setError(e.message || "Erro ao carregar dados do dashboard.");
     } finally {
@@ -1206,7 +1211,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
 
         {/* Card Promessas de Pagamento (Dividido em Promessas para Hoje e Datas Posteriores) */}
         {(() => {
-          const promessasNaoCumpridas = promessas.filter(p => !p.cumprida);
+          const promessasNaoCumpridas = (promessas || []).filter(p => !p.cumprida);
           const promessasHoje = promessasNaoCumpridas.filter(p => p.dataPromessa === dataHoje);
           const promessasPosteriores = promessasNaoCumpridas
             .filter(p => p.dataPromessa > dataHoje)
