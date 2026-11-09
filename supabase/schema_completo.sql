@@ -363,6 +363,74 @@ grant execute on function public.clientes_resumo(text, boolean, integer, integer
 grant execute on function public.cliente_promissorias(text) to authenticated;
 grant execute on function public.relatorio_vencimentos(date, date, text) to authenticated;
 
+-- 14. Função Transacional Atômica de Baixa de Pagamento (P0.3 da Auditoria)
+create or replace function public.registrar_baixa_pagamento(
+  p_promissoria_id bigint,
+  p_valor integer,
+  p_data timestamptz default now(),
+  p_detalhes text default null,
+  p_operador_email text default null
+) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare
+  r public.promissorias;
+  v_novo_pago integer;
+  v_novo_saldo integer;
+  v_novo_status text;
+begin
+  if p_valor <= 0 then
+    raise exception 'O valor do pagamento deve ser maior que zero';
+  end if;
+
+  -- Lock pessimista para garantir atomicidade plena contra concorrência
+  select * into r from public.promissorias where id = p_promissoria_id for update;
+  if not found then
+    raise exception 'Promissória com ID % não encontrada', p_promissoria_id;
+  end if;
+
+  v_novo_pago := r.valor_pago + p_valor;
+  v_novo_saldo := greatest(0, r.saldo_devedor - p_valor);
+
+  if v_novo_saldo = 0 then
+    v_novo_status := 'QUITADO';
+  else
+    v_novo_status := 'PAGANDO';
+  end if;
+
+  -- 1. Atualizar a promissória
+  update public.promissorias
+     set valor_pago = v_novo_pago,
+         saldo_devedor = v_novo_saldo,
+         status = v_novo_status,
+         updated_at = now()
+   where id = p_promissoria_id;
+
+  -- 2. Registrar na tabela de pagamentos
+  insert into public.promissoria_pagamentos (
+    promissoria_id, valor_pago, operador_email, operador_id, data_pagamento, detalhes
+  ) values (
+    p_promissoria_id, p_valor, p_operador_email, auth.uid(), coalesce(p_data, now()), p_detalhes
+  );
+
+  -- 3. Registrar na tabela de eventos / auditoria imutável
+  insert into public.promissoria_eventos (
+    promissoria_id, tipo, motivo, saldo_na_data, usuario_id
+  ) values (
+    p_promissoria_id, 'PAGAMENTO', coalesce(p_detalhes, 'Baixa de pagamento registrada'), v_novo_saldo, auth.uid()
+  );
+
+  return jsonb_build_object(
+    'sucesso', true,
+    'promissoria_id', p_promissoria_id,
+    'novo_pago', v_novo_pago,
+    'novo_saldo', v_novo_saldo,
+    'status', v_novo_status
+  );
+end $$;
+
+revoke execute on function public.registrar_baixa_pagamento(bigint, integer, timestamptz, text, text) from public, anon;
+grant execute on function public.registrar_baixa_pagamento(bigint, integer, timestamptz, text, text) to authenticated;
+
 -- ==============================================================================
 -- DICA: Como promover seu usuário para Administrador
 -- Após cadastrar o seu primeiro usuário na aba Authentication do Supabase,

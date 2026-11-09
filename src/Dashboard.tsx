@@ -89,7 +89,42 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
   const [whats, setWhats] = useState<{ cliente: string; telefone: string; valor: number; vencimento?: string } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
-  const [promessas, setPromessas] = useState<PromessaPagamento[]>([]);
+  const carregarPromessasDashboard = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("promessas_pagamento")
+        .select("*")
+        .order("data_promessa", { ascending: true });
+
+      if (!error && data) {
+        setPromessas(data.map((d: any) => ({
+          id: String(d.id),
+          cliente: d.cliente || "",
+          telefone: d.telefone || "",
+          dataPromessa: d.data_promessa ? String(d.data_promessa).slice(0, 10) : "",
+          valor: Number(d.valor) || 0,
+          observacao: d.observacao || undefined,
+          criadaEm: d.created_at || new Date().toISOString(),
+          cumprida: Boolean(d.cumprida),
+        })));
+      } else {
+        setPromessas(obterPromessasPagamento());
+      }
+    } catch {
+      setPromessas(obterPromessasPagamento());
+    }
+  }, []);
+
+  const handleCumprirPromessaDashboard = async (id: string) => {
+    try {
+      await supabase
+        .from("promessas_pagamento")
+        .update({ cumprida: true, cumprida_em: new Date().toISOString() })
+        .eq("id", id);
+    } catch (_) {}
+    marcarPromessaCumprida(id);
+    await carregarPromessasDashboard();
+  };
   
   // Modos de Meta: "inadimplentes" (crédito vencido recuperado) ou "global" (total recebido em caixa)
   const [modoMeta, setModoMeta] = useState<"inadimplentes" | "global">(() => {
@@ -308,7 +343,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       setResumo(res);
       setAbertas(listaAbertas);
       setPerdidas(dadosPerdidos || []);
-      setPromessas(obterPromessasPagamento());
+      await carregarPromessasDashboard();
     } catch (e: any) {
       setError(e.message || "Erro ao carregar dados do dashboard.");
     } finally {
@@ -1255,10 +1290,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                             type="button"
                             className="btn ghost"
                             style={{ padding: "3px 8px", fontSize: 11 }}
-                            onClick={() => {
-                              marcarPromessaCumprida(p.id);
-                              setPromessas(obterPromessasPagamento());
-                            }}
+                            onClick={() => handleCumprirPromessaDashboard(p.id)}
                             title="Marcar como cumprida"
                           >
                             ✓
@@ -1361,10 +1393,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                               type="button"
                               className="btn ghost"
                               style={{ padding: "3px 8px", fontSize: 11 }}
-                              onClick={() => {
-                                marcarPromessaCumprida(p.id);
-                                setPromessas(obterPromessasPagamento());
-                              }}
+                              onClick={() => handleCumprirPromessaDashboard(p.id)}
                               title="Marcar como cumprida"
                             >
                               ✓

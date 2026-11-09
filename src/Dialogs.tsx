@@ -1961,6 +1961,28 @@ export function WhatsDialog({
   const [telInput, setTelInput] = useState(mascaraTelefone(telefone || ""));
   const [salvandoTel, setSalvandoTel] = useState(false);
   const [avisoSucessoTel, setAvisoSucessoTel] = useState("");
+  const [ultimoContatoHoje, setUltimoContatoHoje] = useState<{ hora: string; email?: string } | null>(null);
+
+  // Verifica se o cliente já foi contatado hoje para evitar abordagens repetidas
+  useEffect(() => {
+    let cancel = false;
+    const h = hoje();
+    supabase
+      .from("cobranca_interacoes")
+      .select("created_at, usuario_email")
+      .ilike("cliente_nome", nome)
+      .gte("created_at", `${h}T00:00:00`)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .then(({ data }) => {
+        if (cancel || !data || data.length === 0) return;
+        const d = new Date(data[0].created_at);
+        const hora = d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        setUltimoContatoHoje({ hora, email: data[0].usuario_email || undefined });
+      })
+      .catch(() => {});
+    return () => { cancel = true; };
+  }, [nome]);
 
   // Busca sempre o telefone mais recente salvo para este cliente no banco
   useEffect(() => {
@@ -2033,6 +2055,26 @@ export function WhatsDialog({
         <div>
           <b style={{ fontSize: 16 }}>{nome}</b>
         </div>
+
+        {ultimoContatoHoje && (
+          <div style={{
+            padding: "8px 12px",
+            background: "#fef3c7",
+            borderRadius: 8,
+            border: "1px solid #fde68a",
+            fontSize: 12,
+            color: "#92400e",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+          }}>
+            <span>⚠️</span>
+            <span>
+              <b>Atenção (Governança):</b> Este cliente já recebeu cobrança hoje às <b>{ultimoContatoHoje.hora}</b>
+              {ultimoContatoHoje.email ? ` por ${ultimoContatoHoje.email}` : ""}. Evite contatos repetidos para prevenir constrangimento.
+            </span>
+          </div>
+        )}
 
         <label>
           Telefone do WhatsApp (editável)
@@ -2183,12 +2225,36 @@ export function FichaCliente({
     onChanged?.();
   };
 
+  const [historicoCobrancas, setHistoricoCobrancas] = useState<{ id: number; data: string; canal: string; usuario: string; msg: string }[]>([]);
+  const [exibirHistoricoCobranca, setExibirHistoricoCobranca] = useState(false);
+
+  const carregarHistoricoCobrancas = useCallback(async () => {
+    try {
+      const { data } = await supabase
+        .from("cobranca_interacoes")
+        .select("id, created_at, canal, usuario_email, mensagem")
+        .ilike("cliente_nome", cliente)
+        .order("created_at", { ascending: false })
+        .limit(10);
+      if (data) {
+        setHistoricoCobrancas(data.map(h => ({
+          id: h.id,
+          data: h.created_at,
+          canal: h.canal || "WHATSAPP",
+          usuario: h.usuario_email || "Operador",
+          msg: h.mensagem || "",
+        })));
+      }
+    } catch (_) {}
+  }, [cliente]);
+
   const load = useCallback(async () => {
     const { data, error } = await supabase.rpc("cliente_promissorias", { p_cliente: cliente });
     if (error) setErr(error.message);
     else setRows((data ?? []) as Row[]);
     carregarPromessaAtiva();
-  }, [cliente, carregarPromessaAtiva]);
+    carregarHistoricoCobrancas();
+  }, [cliente, carregarPromessaAtiva, carregarHistoricoCobrancas]);
 
   useEffect(() => {
     load();
@@ -2660,6 +2726,71 @@ export function FichaCliente({
             </tbody>
           </table>
         </div>
+
+        {historicoCobrancas.length > 0 && (
+          <div style={{
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: "10px 14px",
+            background: "var(--card)",
+            fontSize: 12,
+          }}>
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                cursor: "pointer",
+                userSelect: "none",
+              }}
+              onClick={() => setExibirHistoricoCobranca(v => !v)}
+            >
+              <b style={{ display: "flex", alignItems: "center", gap: 6, color: "var(--ink)" }}>
+                <span>📋</span> Trilha de Cobrança / Disparos Realizados ({historicoCobrancas.length})
+              </b>
+              <span style={{ fontSize: 11, color: "var(--brand)", fontWeight: 700 }}>
+                {exibirHistoricoCobranca ? "▲ Ocultar" : "▼ Ver histórico"}
+              </span>
+            </div>
+
+            {exibirHistoricoCobranca && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
+                {historicoCobrancas.map(h => {
+                  const d = new Date(h.data);
+                  const dataFormatada = d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                  return (
+                    <div
+                      key={h.id}
+                      style={{
+                        padding: "8px 10px",
+                        background: "var(--bg)",
+                        borderRadius: 6,
+                        border: "1px solid var(--line)",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 4,
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 6 }}>
+                        <span style={{ fontWeight: 700, color: "var(--brand)" }}>
+                          💬 {h.canal} · {dataFormatada}
+                        </span>
+                        <span style={{ fontSize: 11, color: "var(--mut)" }}>
+                          Por: <b>{h.usuario}</b>
+                        </span>
+                      </div>
+                      {h.msg && (
+                        <div style={{ fontSize: 11.5, color: "var(--ink)", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto", background: "var(--card)", padding: 6, borderRadius: 4 }}>
+                          {h.msg}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
       {desmembrarRow && <DesmembrarDialog row={desmembrarRow} onClose={() => setDesmembrarRow(null)} onSaved={() => { setDesmembrarRow(null); refresh(); }} />}
@@ -3014,15 +3145,32 @@ export function BaixaDialog({
         }
       } else {
         // Abate parcial da parcela atual (sem recalcular) ou quitação com valor exato
-        const novoPago = row.valor_pago + V;
-        const { error } = await supabase
-          .from("promissorias")
-          .update({
-            valor_pago: novoPago,
-            origem: origemComLogs,
-          })
-          .eq("id", row.id);
-        if (error) throw new Error(error.message);
+        // Tenta executar via RPC transacional atômica (P0.3 da Auditoria)
+        let usouRpc = false;
+        try {
+          const { data: rpcRes, error: rpcErr } = await supabase.rpc("registrar_baixa_pagamento", {
+            p_promissoria_id: row.id,
+            p_valor: V,
+            p_data: agoraIso,
+            p_detalhes: detalhesOp,
+            p_operador_email: operadorEmail,
+          });
+          if (!rpcErr && rpcRes?.sucesso) {
+            usouRpc = true;
+          }
+        } catch (_) {}
+
+        if (!usouRpc) {
+          const novoPago = row.valor_pago + V;
+          const { error } = await supabase
+            .from("promissorias")
+            .update({
+              valor_pago: novoPago,
+              origem: origemComLogs,
+            })
+            .eq("id", row.id);
+          if (error) throw new Error(error.message);
+        }
       }
 
       // Calcular saldo restante e gerar mensagem de comprovante para o WhatsApp

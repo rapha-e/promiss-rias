@@ -256,6 +256,7 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
   const [whats, setWhats] = useState<Cli | null>(null);
   const [error, setError] = useState("");
   const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
+  const [modoPrivacidade, setModoPrivacidade] = useState(false);
 
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
@@ -343,6 +344,14 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
           ))}
         </datalist>
         <button className={`chip ${abertos ? "on" : ""}`} onClick={() => { setAbertos(!abertos); setPage(0); }}>Somente com saldo em aberto</button>
+        <button
+          type="button"
+          className={`chip ${modoPrivacidade ? "on" : ""}`}
+          onClick={() => setModoPrivacidade(!modoPrivacidade)}
+          title="Ocultar partes de telefones na tela para proteção em atendimento ao público (LGPD)"
+        >
+          {modoPrivacidade ? "🔒 Modo Balcão Ativo" : "👁️ Modo Balcão"}
+        </button>
       </div>
       <div className="wrap">
         <table>
@@ -410,7 +419,11 @@ export default function Clientes({ isAdmin }: { isAdmin: boolean }) {
                     })()}
                   </div>
                 </td>
-                <td className="mono">{c.telefone || "—"}</td>
+                <td className="mono">
+                  {modoPrivacidade && c.telefone && c.telefone.length >= 6
+                    ? c.telefone.slice(0, 3) + "•••••" + c.telefone.slice(-2)
+                    : (c.telefone || "—")}
+                </td>
                 <td className="n">{c.qtd}</td>
                 <td className="n">{money(c.divida)}</td>
                 <td className="n">{money(c.pago)}</td>

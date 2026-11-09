@@ -89,6 +89,7 @@ export default function RenegociacaoCobranca({
   const [repactuando, setRepactuando] = useState(false);
   const [primeiroVencRepactuacao, setPrimeiroVencRepactuacao] = useState(somaDiasStr(getHojeISO(), 30));
   const [obsRepactuacao, setObsRepactuacao] = useState<string>("");
+  const [modoPrivacidade, setModoPrivacidade] = useState(false);
 
   const hoje = getHojeISO();
 
@@ -388,6 +389,20 @@ export default function RenegociacaoCobranca({
     const url = linkWhatsApp(item.telefoneFormatado, msg);
     window.open(url, "_blank");
 
+    // Trilha de auditoria da cobrança (P1.1 e P1.4 da Auditoria)
+    try {
+      supabase.auth.getUser().then(({ data: userData }) => {
+        supabase.from("cobranca_interacoes").insert({
+          cliente_nome: item.cliente,
+          telefone: item.telefoneOriginal || item.telefoneFormatado,
+          canal: "WHATSAPP",
+          mensagem: msg,
+          usuario_id: userData?.user?.id || null,
+          usuario_email: userData?.user?.email || null,
+        }).then(() => {});
+      });
+    } catch (_) {}
+
     const chave = item.cliente.trim().toUpperCase();
     setEstadosEnvio(prev => ({ ...prev, [chave]: "enviado" }));
 
@@ -465,6 +480,14 @@ export default function RenegociacaoCobranca({
           </label>
           <button type="button" className="btn ghost" onClick={carregarDados} title="Recarregar clientes">
             🔄 Atualizar
+          </button>
+          <button
+            type="button"
+            className={`btn ghost ${modoPrivacidade ? "on" : ""}`}
+            onClick={() => setModoPrivacidade(!modoPrivacidade)}
+            title="Ocultar partes de telefones na tela para proteção em atendimento ao público (LGPD)"
+          >
+            {modoPrivacidade ? "🔒 Modo Balcão Ativo" : "👁️ Modo Balcão"}
           </button>
         </div>
       </div>
@@ -720,7 +743,11 @@ export default function RenegociacaoCobranca({
                     </div>
 
                     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: "var(--mut)" }}>
-                      <span className="mono">{item.telefoneOriginal || "Sem telefone"}</span>
+                      <span className="mono">
+                        {modoPrivacidade && item.telefoneOriginal && item.telefoneOriginal.length >= 6
+                          ? item.telefoneOriginal.slice(0, 3) + "•••••" + item.telefoneOriginal.slice(-2)
+                          : (item.telefoneOriginal || "Sem telefone")}
+                      </span>
                       <span style={{ fontWeight: 700, color: "var(--ink)" }}>{money(item.valorTotal)}</span>
                     </div>
 
@@ -777,7 +804,13 @@ export default function RenegociacaoCobranca({
                   </button>
                 </div>
                 <div style={{ fontSize: 13, color: "var(--mut)", marginTop: 2 }}>
-                  Telefone WhatsApp: <b className="mono">{clienteAtual.telefoneFormatado ? `+${clienteAtual.telefoneFormatado}` : "Não formatado / ausente"}</b>
+                  Telefone WhatsApp: <b className="mono">
+                    {clienteAtual.telefoneFormatado
+                      ? (modoPrivacidade && clienteAtual.telefoneFormatado.length >= 6
+                          ? `+${clienteAtual.telefoneFormatado.slice(0, 4)}•••••${clienteAtual.telefoneFormatado.slice(-2)}`
+                          : `+${clienteAtual.telefoneFormatado}`)
+                      : "Não formatado / ausente"}
+                  </b>
                 </div>
               </div>
 
