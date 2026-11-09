@@ -254,10 +254,41 @@ language sql stable security invoker set search_path = public as $$
    order by p.vencimento, p.id;
 $$;
 
--- 10. Políticas de Segurança (Row Level Security - RLS)
+-- 10. Tabela de Promessas de Pagamento (Follow-up de Cobrança)
+create table if not exists public.promessas_pagamento (
+  id bigint generated always as identity primary key,
+  cliente text not null,
+  telefone text,
+  data_promessa date not null,
+  valor bigint not null default 0 check (valor >= 0),
+  observacao text,
+  cumprida boolean not null default false,
+  cumprida_em timestamptz,
+  created_at timestamptz not null default now()
+);
+
+-- 11. Políticas de Segurança (Row Level Security - RLS)
 alter table public.profiles enable row level security;
 alter table public.promissorias enable row level security;
 alter table public.promissoria_eventos enable row level security;
+alter table public.promessas_pagamento enable row level security;
+
+-- Promessas de pagamento: autenticados podem ler e registrar; exclusão restrita a admin
+drop policy if exists "promessas: leitura" on public.promessas_pagamento;
+create policy "promessas: leitura" on public.promessas_pagamento
+  for select to authenticated using (true);
+
+drop policy if exists "promessas: inserir" on public.promessas_pagamento;
+create policy "promessas: inserir" on public.promessas_pagamento
+  for insert to authenticated with check (true);
+
+drop policy if exists "promessas: atualizar" on public.promessas_pagamento;
+create policy "promessas: atualizar" on public.promessas_pagamento
+  for update to authenticated using (true);
+
+drop policy if exists "promessas: excluir (admin)" on public.promessas_pagamento;
+create policy "promessas: excluir (admin)" on public.promessas_pagamento
+  for delete to authenticated using (public.is_admin());
 
 -- Profiles: cada usuário autenticado pode ler apenas o seu perfil
 drop policy if exists "perfil: ler o próprio" on public.profiles;

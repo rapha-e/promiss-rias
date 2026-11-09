@@ -28,8 +28,71 @@ export default function PromessasPagamento() {
   const [mostrarSugestoes, setMostrarSugestoes] = useState(false);
   const [buscandoSugestoes, setBuscandoSugestoes] = useState(false);
 
-  // Carrega as promessas salvas
-  const carregar = useCallback(() => {
+  // Carrega as promessas salvas (Supabase com fallback e migração automática de localStorage)
+  const carregar = useCallback(async () => {
+    try {
+      const { data, error } = await supabase
+        .from("promessas_pagamento")
+        .select("*")
+        .order("data_promessa", { ascending: true });
+
+      if (!error && data) {
+        const mapeadas: PromessaPagamento[] = data.map((d: any) => ({
+          id: String(d.id),
+          cliente: d.cliente || "",
+          telefone: d.telefone || "",
+          dataPromessa: d.data_promessa ? String(d.data_promessa).slice(0, 10) : "",
+          valor: Number(d.valor) || 0,
+          observacao: d.observacao || undefined,
+          criadaEm: d.created_at || new Date().toISOString(),
+          cumprida: Boolean(d.cumprida),
+        }));
+
+        // Migração automática de promessas legadas do localStorage para o banco Supabase
+        const locais = obterPromessasPagamento();
+        if (locais.length > 0) {
+          for (const loc of locais) {
+            const jaExiste = mapeadas.some(
+              m => m.cliente.toUpperCase() === loc.cliente.toUpperCase() && m.dataPromessa === loc.dataPromessa
+            );
+            if (!jaExiste) {
+              await supabase.from("promessas_pagamento").insert({
+                cliente: loc.cliente,
+                telefone: loc.telefone,
+                data_promessa: loc.dataPromessa,
+                valor: loc.valor,
+                observacao: loc.observacao,
+                cumprida: loc.cumprida,
+              });
+            }
+          }
+          try { localStorage.removeItem("leooticas_promessas_pagamento"); } catch (_) {}
+          // Recarrega consolidadas do Supabase
+          const { data: recarregadas } = await supabase
+            .from("promessas_pagamento")
+            .select("*")
+            .order("data_promessa", { ascending: true });
+          if (recarregadas) {
+            setPromessas(recarregadas.map((d: any) => ({
+              id: String(d.id),
+              cliente: d.cliente || "",
+              telefone: d.telefone || "",
+              dataPromessa: d.data_promessa ? String(d.data_promessa).slice(0, 10) : "",
+              valor: Number(d.valor) || 0,
+              observacao: d.observacao || undefined,
+              criadaEm: d.created_at || new Date().toISOString(),
+              cumprida: Boolean(d.cumprida),
+            })));
+            return;
+          }
+        }
+
+        setPromessas(mapeadas);
+        return;
+      }
+    } catch (_) {}
+
+    // Fallback gracioso para localStorage
     setPromessas(obterPromessasPagamento());
   }, []);
 
@@ -92,7 +155,7 @@ export default function PromessasPagamento() {
     setMostrarSugestoes(false);
   };
 
-  const handleSalvarNovaPromessa = (e: React.FormEvent) => {
+  const handleSalvarNovaPromessa = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!novoCliente.trim()) {
       alert("Informe o nome do cliente.");
@@ -105,15 +168,38 @@ export default function PromessasPagamento() {
 
     const valorCentavos = desmascararMoeda(novoValor);
 
-    salvarPromessaPagamento({
-      cliente: novoCliente.trim(),
-      telefone: (novoTelefone || "").replace(/\D/g, ""),
-      dataPromessa: novaData,
-      valor: valorCentavos,
-      observacao: novaObs.trim() || undefined,
-    });
+    try {
+      const { error } = await supabase
+        .from("promessas_pagamento")
+        .insert({
+          cliente: novoCliente.trim(),
+          telefone: (novoTelefone || "").replace(/\D/g, ""),
+          data_promessa: novaData,
+          valor: valorCentavos,
+          observacao: novaObs.trim() || null,
+          cumprida: false,
+        });
 
-    carregar();
+      if (error) {
+        salvarPromessaPagamento({
+          cliente: novoCliente.trim(),
+          telefone: (novoTelefone || "").replace(/\D/g, ""),
+          dataPromessa: novaData,
+          valor: valorCentavos,
+          observacao: novaObs.trim() || undefined,
+        });
+      }
+    } catch (_) {
+      salvarPromessaPagamento({
+        cliente: novoCliente.trim(),
+        telefone: (novoTelefone || "").replace(/\D/g, ""),
+        dataPromessa: novaData,
+        valor: valorCentavos,
+        observacao: novaObs.trim() || undefined,
+      });
+    }
+
+    await carregar();
     setModalNovo(false);
     // Limpar formulário
     setNovoCliente("");
@@ -124,20 +210,31 @@ export default function PromessasPagamento() {
     setSaldoClienteEncontrado(null);
   };
 
-  const handleAlternarCumprida = (p: PromessaPagamento) => {
-    if (p.cumprida) {
-      // Reabrir
+  const handleAlternarCumprida = async (p: PromessaPagamento) => {
+    const novoStatus = !p.cumprida;
+    try {
+      await supabase
+        .from("promessas_pagamento")
+        .update({ cumprida: novoStatus, cumprida_em: novoStatus ? new Date().toISOString() : null })
+        .eq("id", p.id);
+    } catch (_) {}
+
+    // Sincroniza também no storage se existir
+    if (novoStatus) {
+      marcarPromessaCumprida(p.id);
+    } else {
       const todas = obterPromessasPagamento();
       const atualizadas = todas.map(item => (item.id === p.id ? { ...item, cumprida: false } : item));
-      localStorage.setItem("leooticas_promessas_pagamento", JSON.stringify(atualizadas));
-    } else {
-      marcarPromessaCumprida(p.id);
+      try { localStorage.setItem("leooticas_promessas_pagamento", JSON.stringify(atualizadas)); } catch (_) {}
     }
     carregar();
   };
 
-  const handleExcluir = (p: PromessaPagamento) => {
+  const handleExcluir = async (p: PromessaPagamento) => {
     if (confirm(`Deseja realmente excluir a promessa de ${p.cliente} para ${dt(p.dataPromessa)}?`)) {
+      try {
+        await supabase.from("promessas_pagamento").delete().eq("id", p.id);
+      } catch (_) {}
       excluirPromessa(p.id);
       carregar();
     }
@@ -786,28 +883,31 @@ export default function PromessasPagamento() {
                     required
                   />
                 </label>
+                <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 4 }}>
+                  📅 Hoje é <b>{dt(hoje())}</b> · Data escolhida: <b style={{ color: "var(--brand)" }}>{novaData ? dt(novaData) : "—"}</b>
+                </div>
 
                 {/* Atalhos rápidos de data */}
                 <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
                   <button
                     type="button"
-                    className="chip"
+                    className={`chip ${novaData === hoje() ? "on" : ""}`}
                     onClick={() => setNovaData(hoje())}
                     style={{ fontSize: 11.5, padding: "4px 8px" }}
                   >
-                    Hoje
+                    Hoje ({dt(hoje()).slice(0, 5)})
                   </button>
                   <button
                     type="button"
-                    className="chip"
+                    className={`chip ${novaData === somaDias(hoje(), 1) ? "on" : ""}`}
                     onClick={() => setNovaData(somaDias(hoje(), 1))}
                     style={{ fontSize: 11.5, padding: "4px 8px" }}
                   >
-                    Amanhã
+                    Amanhã ({dt(somaDias(hoje(), 1)).slice(0, 5)})
                   </button>
                   <button
                     type="button"
-                    className="chip"
+                    className={`chip ${novaData === somaDias(hoje(), 3) ? "on" : ""}`}
                     onClick={() => setNovaData(somaDias(hoje(), 3))}
                     style={{ fontSize: 11.5, padding: "4px 8px" }}
                   >
@@ -815,7 +915,7 @@ export default function PromessasPagamento() {
                   </button>
                   <button
                     type="button"
-                    className="chip"
+                    className={`chip ${novaData === somaDias(hoje(), 7) ? "on" : ""}`}
                     onClick={() => setNovaData(somaDias(hoje(), 7))}
                     style={{ fontSize: 11.5, padding: "4px 8px" }}
                   >
@@ -823,7 +923,7 @@ export default function PromessasPagamento() {
                   </button>
                   <button
                     type="button"
-                    className="chip"
+                    className={`chip ${novaData === somaDias(hoje(), 15) ? "on" : ""}`}
                     onClick={() => setNovaData(somaDias(hoje(), 15))}
                     style={{ fontSize: 11.5, padding: "4px 8px" }}
                   >

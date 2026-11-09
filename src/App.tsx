@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, lazy, Suspense } from "react";
 import type { FormEvent } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { configured, supabase } from "./supabase";
-import Promissorias from "./Promissorias";
-import Clientes from "./Clientes";
-import RenegociacaoCobranca from "./RenegociacaoCobranca";
-import PromessasPagamento from "./PromessasPagamento";
-import Dashboard from "./Dashboard";
 import logo from "./logo.png";
+
+const Dashboard = lazy(() => import("./Dashboard"));
+const Promissorias = lazy(() => import("./Promissorias"));
+const Clientes = lazy(() => import("./Clientes"));
+const RenegociacaoCobranca = lazy(() => import("./RenegociacaoCobranca"));
+const PromessasPagamento = lazy(() => import("./PromessasPagamento"));
 
 function Login() {
   const [usuario, setUsuario] = useState("");
@@ -75,11 +76,13 @@ function Shell({ session }: { session: Session }) {
         {TABS.map(([k, l]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
       </nav>
       <main>
-        {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
-        {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
-        {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
-        {tab === "renegociacao" && <RenegociacaoCobranca />}
-        {tab === "promessas" && <PromessasPagamento />}
+        <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "var(--mut)", fontSize: 14 }}>Carregando módulo…</div>}>
+          {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
+          {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
+          {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
+          {tab === "renegociacao" && <RenegociacaoCobranca />}
+          {tab === "promessas" && <PromessasPagamento />}
+        </Suspense>
       </main>
     </>
   );

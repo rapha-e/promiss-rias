@@ -1,0 +1,16 @@
+{
+  "name": "LeoÓticas Fin - Promissórias",
+  "short_name": "Promissórias",
+  "description": "Sistema de Gestão de Promissórias e Cobrança LeoÓticas",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FBF7F0",
+  "theme_color": "#0F766E",
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ]
+}

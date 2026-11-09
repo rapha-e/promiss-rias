@@ -118,6 +118,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [fichaCliente, setFichaCliente] = useState<{ cliente: string; telefone?: string } | null>(null);
   const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
   const [varreduraOpen, setVarreduraOpen] = useState(false);
+  const [modoPrivacidade, setModoPrivacidade] = useState(false);
   const [error, setError] = useState("");
   const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
   const [nomesFiltrados, setNomesFiltrados] = useState<string[] | null>(null);
@@ -1120,6 +1121,26 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             </>
           )}
         </div>
+
+        {/* Botão de Privacidade / Modo Balcão */}
+        <button
+          type="button"
+          className={`chip ${modoPrivacidade ? "on" : ""}`}
+          onClick={() => setModoPrivacidade(prev => !prev)}
+          title={modoPrivacidade ? "Modo Balcão ativo: telefones mascarados para privacidade. Clique para desativar." : "Ativar Modo Balcão: mascara telefones na tabela para evitar exposição a clientes próximos."}
+          style={{
+            marginLeft: "auto",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            padding: "5px 11px",
+            border: modoPrivacidade ? "1.5px solid #10b981" : undefined,
+            fontWeight: modoPrivacidade ? 700 : 500,
+          }}
+        >
+          <span>{modoPrivacidade ? "🔒 Balcão Protegido" : "👁️ Modo Balcão"}</span>
+        </button>
       </div>
       <div className="bar" style={{ flexWrap: "wrap", gap: 10 }}>
         <input
@@ -1673,7 +1694,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                       )}
                     </div>
                   </td>
-                  <td className="mono">{cli.telefone || "—"}</td>
+                  <td className="mono">
+                    {modoPrivacidade && cli.telefone && cli.telefone.length >= 6
+                      ? cli.telefone.slice(0, 3) + "•••••" + cli.telefone.slice(-2)
+                      : (cli.telefone || "—")}
+                  </td>
                   <td className="n">{money(cli.divida_total)}</td>
                   <td className="n">{money(cli.valor_pago)}</td>
                   <td className="n"><b>{money(cli.saldo_devedor)}</b></td>
