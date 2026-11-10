@@ -106,7 +106,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [anoIni, setAnoIni] = useState("");
   const [anoFim, setAnoFim] = useState("");
   const [projecaoPeriodo, setProjecaoPeriodo] = useState<{ qtd: number; valor: number } | null>(null);
-  const [sortCol, setSortCol] = useState("vencimento");
+  const [sortCol, setSortCol] = useState("recente");
   const [sortAsc, setSortAsc] = useState(false);
   const [page, setPage] = useState(0);
   const [baixa, setBaixa] = useState<Row | null>(null);
@@ -264,11 +264,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     // 3. Se o usuário está no card 'Todas' geral sem filtros adicionais de texto/datas
     if (!s && !status && statusMultiplos.length === 0 && !filtroCliente && !ini && !fim && !venc && !filtroScore && !filtroTelefone && !filtroDivida && !filtroPago && !filtroSaldo) {
       const [r1, r2, r3, r4, rQuit] = await Promise.all([
-        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(0, 999),
-        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(1000, 1999),
-        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(2000, 2999),
-        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).range(3000, 3999),
-        supabase.from("promissorias").select("*").eq("fundo_perdido", false).lte("saldo_devedor", 0).order("vencimento", { ascending: false }).limit(1000)
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(1000, 1999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(2000, 2999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(3000, 3999),
+        supabase.from("promissorias").select("*").eq("fundo_perdido", false).lte("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).limit(1000)
       ]);
       const uniao = [
         ...(r1.data || []),
@@ -356,7 +356,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", d7Str);
     }
 
-    if (sortCol === "status") {
+    if (sortCol === "recente") {
+      query = query.order("updated_at", { ascending: sortAsc, nullsFirst: false }).order("id", { ascending: sortAsc });
+    } else if (sortCol === "status") {
       query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
     } else if (sortCol === "vencimento") {
       query = query.order("vencimento", { ascending: sortAsc, nullsFirst: false });
@@ -455,6 +457,14 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
 
   const sortedClientes = useMemo(() => {
     return [...clientesConsolidados].sort((a, b) => {
+      if (sortCol === "recente") {
+        const tA = a.ultimaAtualizacao ? new Date(a.ultimaAtualizacao).getTime() : 0;
+        const tB = b.ultimaAtualizacao ? new Date(b.ultimaAtualizacao).getTime() : 0;
+        if (tA !== tB) {
+          return sortAsc ? tA - tB : tB - tA;
+        }
+        return sortAsc ? ((a.maiorId ?? 0) - (b.maiorId ?? 0)) : ((b.maiorId ?? 0) - (a.maiorId ?? 0));
+      }
       if (sortCol === "vencimento" || sortCol === "status") {
         const aTem = (a.saldo_devedor > 0 && !a.fundo_perdido) ? 1 : 0;
         const bTem = (b.saldo_devedor > 0 && !b.fundo_perdido) ? 1 : 0;
@@ -631,7 +641,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const toggleVenc = (f: VencFiltro) => {
     if (venc === f) {
       setVenc("");
-      setSortCol("vencimento");
+      setSortCol("recente");
       setSortAsc(false);
     } else {
       setVenc(f);
@@ -649,7 +659,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       setSortAsc(a => !a);
     } else {
       setSortCol(col);
-      if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor") {
+      if (col === "divida_total" || col === "valor_pago" || col === "saldo_devedor" || col === "recente") {
         setSortAsc(false);
       } else if (col === "vencimento") {
         setSortAsc(Boolean(venc && venc !== "vencidas"));
@@ -675,6 +685,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setStatus("");
     setStatusMultiplos([]);
     setVenc("");
+    setSortCol("recente");
+    setSortAsc(false);
     reset();
   };
 
@@ -725,7 +737,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0).gte("vencimento", h).lte("vencimento", d7Str);
       }
 
-      if (sortCol === "status") {
+      if (sortCol === "recente") {
+        query = query.order("updated_at", { ascending: sortAsc, nullsFirst: false }).order("id", { ascending: sortAsc });
+      } else if (sortCol === "status") {
         query = query.order("fundo_perdido", { ascending: sortAsc }).order("status", { ascending: sortAsc });
       } else if (sortCol === "vencimento") {
         query = query.order("vencimento", { ascending: sortAsc, nullsFirst: false });
@@ -1336,6 +1350,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
             reset();
           }}
         >
+          <option value="recente:desc">✨ Últimos inseridos / alterados</option>
+          <option value="recente:asc">Antigos inseridos / alterados</option>
           <option value="vencimento:desc">Vencimento (recente)</option>
           <option value="vencimento:asc">Vencimento (mais antigo / próximo)</option>
           <option value="saldo_devedor:desc">Maior saldo</option>

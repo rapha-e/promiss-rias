@@ -497,6 +497,8 @@ export interface ClienteConsolidado {
   proximaPromissoria: Row | null;
   fundo_perdido: boolean;
   todasPromissorias: Row[];
+  ultimaAtualizacao: string; // Timestamp ISO da última inserção ou alteração
+  maiorId: number;           // Maior ID entre as promissórias do cliente
 }
 
 /**
@@ -790,6 +792,21 @@ export function consolidarCliente(clienteNome: string, telefone: string, rows: R
     ? comprasAbertas.reduce((s, c) => s + c.saldoDevedor, 0)
     : 0;
 
+  // Encontra a data mais recente de criação/alteração e o maior ID entre todas as promissórias do cliente
+  let maxTime = 0;
+  let maxIso = "";
+  let maxId = 0;
+  for (const r of rows) {
+    if (r.id > maxId) maxId = r.id;
+    const tUp = r.updated_at ? new Date(r.updated_at).getTime() : 0;
+    const tCr = r.created_at ? new Date(r.created_at).getTime() : 0;
+    const bestT = Math.max(tUp, tCr);
+    if (bestT > maxTime) {
+      maxTime = bestT;
+      maxIso = r.updated_at || r.created_at || "";
+    }
+  }
+
   return {
     cliente_nome: clienteNome,
     telefone: telefone || compraPrincipal.promissorias.find(p => p.telefone)?.telefone || "",
@@ -806,6 +823,8 @@ export function consolidarCliente(clienteNome: string, telefone: string, rows: R
     proximaPromissoria: compraPrincipal.proximaPromissoria,
     fundo_perdido: rows.length > 0 && rows.every(r => r.fundo_perdido),
     todasPromissorias: rows,
+    ultimaAtualizacao: maxIso,
+    maiorId: maxId,
   };
 }
 
