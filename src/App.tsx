@@ -38,6 +38,7 @@ const Promissorias = lazy(() => import("./Promissorias"));
 const Clientes = lazy(() => import("./Clientes"));
 const RenegociacaoCobranca = lazy(() => import("./RenegociacaoCobranca"));
 const PromessasPagamento = lazy(() => import("./PromessasPagamento"));
+const AutomacaoWhatsApp = lazy(() => import("./AutomacaoWhatsApp"));
 
 function Login() {
   const [usuario, setUsuario] = useState("");
@@ -81,6 +82,7 @@ const TABS = [
   ["clientes", "Clientes"],
   ["renegociacao", "Renegociação & Cobrança"],
   ["promessas", "Agendar Promessa"],
+  ["automacao", "Automação WhatsApp"],
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
@@ -112,6 +114,7 @@ function Shell({ session }: { session: Session }) {
             {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
             {tab === "renegociacao" && <RenegociacaoCobranca />}
             {tab === "promessas" && <PromessasPagamento />}
+            {tab === "automacao" && <AutomacaoWhatsApp isAdmin={isAdmin} />}
           </Suspense>
         </ErrorBoundary>
       </main>
