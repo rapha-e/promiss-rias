@@ -172,7 +172,7 @@ export default function PromessasPagamento() {
       const { error } = await supabase
         .from("promessas_pagamento")
         .insert({
-          cliente: novoCliente.trim(),
+          cliente: novoCliente.trim().toUpperCase(),
           telefone: (novoTelefone || "").replace(/\D/g, ""),
           data_promessa: novaData,
           valor: valorCentavos,
@@ -182,7 +182,7 @@ export default function PromessasPagamento() {
 
       if (error) {
         salvarPromessaPagamento({
-          cliente: novoCliente.trim(),
+          cliente: novoCliente.trim().toUpperCase(),
           telefone: (novoTelefone || "").replace(/\D/g, ""),
           dataPromessa: novaData,
           valor: valorCentavos,
@@ -191,7 +191,7 @@ export default function PromessasPagamento() {
       }
     } catch (_) {
       salvarPromessaPagamento({
-        cliente: novoCliente.trim(),
+        cliente: novoCliente.trim().toUpperCase(),
         telefone: (novoTelefone || "").replace(/\D/g, ""),
         dataPromessa: novaData,
         valor: valorCentavos,
@@ -784,7 +784,8 @@ export default function PromessasPagamento() {
                   <input
                     type="text"
                     value={novoCliente}
-                    onChange={e => setNovoCliente(e.target.value)}
+                    onChange={e => setNovoCliente(e.target.value.toUpperCase())}
+                    style={{ textTransform: "uppercase" }}
                     placeholder="Digite o nome do cliente..."
                     required
                     autoFocus
