@@ -61,7 +61,7 @@ export function VencCell({ r }: { r: Row }) {
 }
 
 export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: () => void; onSaved: () => void }) {
-  const [n, setN] = useState(row?.cliente_nome ?? "");
+  const [n, setN] = useState((row?.cliente_nome ?? "").toUpperCase());
   const [p, setP] = useState(row ? mascaraTelefone(row.telefone) : "");
   const [t, setT] = useState(row ? formatarMascaraMoeda(row.divida_total) : "");
   const [g, setG] = useState(row && row.valor_pago > 0 ? formatarMascaraMoeda(row.valor_pago) : "");
@@ -332,7 +332,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
   // Selecionar cliente e auto preencher os campos instantaneamente
   const selecionarCliente = useCallback((sug: { nome: string; telefone: string; scoreInfo?: CreditScoreInfo }) => {
-    setN(sug.nome);
+    setN(sug.nome.toUpperCase());
     if (sug.telefone) {
       setP(mascaraTelefone(sug.telefone));
     }
@@ -728,7 +728,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       // 2. Gerar as novas promissórias
       const loteId = tipoAjusteUnificacao === "troca_menor_valor" ? `TROCA_${Date.now()}` : `UNIF_${Date.now()}`;
       const novasPayload = parcelasUnificadasCalculadas.map(item => ({
-        cliente_nome: n.trim(),
+        cliente_nome: n.trim().toUpperCase(),
         telefone: p.trim(),
         divida_total: item.valor,
         valor_pago: 0,
@@ -816,8 +816,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
 
     if (row) {
       // Edição de promissória existente
-      const nomeAntigo = (row.cliente_nome || "").trim();
-      const novoNome = n.trim();
+      const nomeAntigo = (row.cliente_nome || "").trim().toUpperCase();
+      const novoNome = n.trim().toUpperCase();
       const novoTel = p.trim();
 
       const payload = {
@@ -918,7 +918,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       // Criação de novas promissórias com divisão automática como uma nova compra independente
       const loteId = `COMPRA_${Date.now()}`;
       const payload = parcelasCalculadas.map(item => ({
-        cliente_nome: n.trim(),
+        cliente_nome: n.trim().toUpperCase(),
         telefone: p.trim(),
         divida_total: item.valor,
         parcelas: item.parcela,
@@ -963,9 +963,10 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 ref={inputNomeRef}
                 value={n}
                 onChange={e => {
-                  setN(e.target.value);
+                  setN(e.target.value.toUpperCase());
                   setMostrarSugestoes(true);
                 }}
+                style={{ textTransform: "uppercase" }}
                 onFocus={() => {
                   if (sugestoes.length > 0) setMostrarSugestoes(true);
                 }}
@@ -1176,7 +1177,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
                 className="btn"
                 style={{ padding: "3px 8px", fontSize: 11, borderRadius: 6 }}
                 onClick={() => {
-                  setN(sugestaoPorTelefone.nome);
+                  setN(sugestaoPorTelefone.nome.toUpperCase());
                   setSugestaoPorTelefone(null);
                   inputValorRef.current?.focus();
                 }}
