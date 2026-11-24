@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState, useRef } from "react";
 import { supabase } from "./supabase";
 import {
   LBL, cls, deriveStatus, dt, hoje, diffDias, mensagemCobranca, money, baixarCSV, extrairInfoParcelas,
@@ -121,6 +121,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [modoPrivacidade, setModoPrivacidade] = useState(false);
   const [error, setError] = useState("");
   const [sugestoesBusca, setSugestoesBusca] = useState<string[]>([]);
+  const [mostrarSugestoes, setMostrarSugestoes] = useState(false);
+  const [clienteSelecionado, setClienteSelecionado] = useState<string | null>(null);
+  const containerBuscaRef = useRef<HTMLDivElement>(null);
   const [nomesFiltrados, setNomesFiltrados] = useState<string[] | null>(null);
   const [promissoriasFiltroMap, setPromissoriasFiltroMap] = useState<Map<string, Row>>(new Map());
   const [promessasAtivasMap, setPromessasAtivasMap] = useState<Map<string, { id: string; dataPromessa: string; valor: number; observacao?: string }>>(new Map());
@@ -180,6 +183,35 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     }
   }, []);
 
+  // Fechar dropdown de sugestões ao clicar fora do campo de busca
+  useEffect(() => {
+    function handleClickOutside(ev: MouseEvent) {
+      if (containerBuscaRef.current && !containerBuscaRef.current.contains(ev.target as Node)) {
+        setMostrarSugestoes(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleSelecionarCliente = (nome: string) => {
+    const nomeLimpo = nome.trim().toUpperCase();
+    setQ(nomeLimpo);
+    setQd(nomeLimpo);
+    setClienteSelecionado(nomeLimpo);
+    setMostrarSugestoes(false);
+    setPage(0);
+  };
+
+  const handleLimparBusca = () => {
+    setQ("");
+    setQd("");
+    setClienteSelecionado(null);
+    setSugestoesBusca([]);
+    setMostrarSugestoes(false);
+    setPage(0);
+  };
+
   useEffect(() => {
     const h = setTimeout(() => { setQd(q); setPage(0); }, 300);
     return () => clearTimeout(h);
@@ -190,6 +222,10 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const val = q.trim();
     if (val.length < 2) {
       setSugestoesBusca([]);
+      setMostrarSugestoes(false);
+      return;
+    }
+    if (clienteSelecionado && val.toUpperCase() === clienteSelecionado.toUpperCase()) {
       return;
     }
     const t = setTimeout(async () => {
@@ -198,15 +234,18 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
           .from("promissorias")
           .select("cliente_nome")
           .ilike("cliente_nome", `%${val}%`)
-          .limit(12);
+          .limit(20);
         if (data) {
-          const unicos = Array.from(new Set(data.map(d => d.cliente_nome.trim()))).slice(0, 8);
+          const unicos = Array.from(new Set(data.map(d => d.cliente_nome.trim()))).slice(0, 10);
           setSugestoesBusca(unicos);
+          if (unicos.length > 0) {
+            setMostrarSugestoes(true);
+          }
         }
       } catch { }
     }, 200);
     return () => clearTimeout(t);
-  }, [q]);
+  }, [q, clienteSelecionado]);
 
   const loadResumo = useCallback(async () => {
     const { data, error } = await supabase.rpc("promissorias_resumo");
@@ -247,7 +286,8 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         .select("*")
         .eq("fundo_perdido", false)
         .lte("saldo_devedor", 0);
-      if (s) qQuit = qQuit.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+      if (clienteSelecionado) qQuit = qQuit.ilike("cliente_nome", clienteSelecionado.trim());
+      else if (s) qQuit = qQuit.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
       if (filtroCliente) qQuit = qQuit.ilike("cliente_nome", `%${filtroCliente.trim()}%`);
       if (ini) qQuit = qQuit.gte("vencimento", ini);
       if (fim) qQuit = qQuit.lte("vencimento", fim);
@@ -255,14 +295,14 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       if (qErr) { setError(qErr.message); return; }
       // Exclui clientes com débitos em aberto (evita que cliente com parcelas atrasadas ou a vencer apareça no Quitado)
       const limpas = (qData ?? []).filter(r => !setAbertos.has(r.cliente_nome.trim().toUpperCase()));
-      setNomesFiltrados(null);
+      setNomesFiltrados(clienteSelecionado ? [clienteSelecionado.trim().toUpperCase()] : null);
       setPromissoriasFiltroMap(new Map());
       setError(""); setRows(limpas as Row[]); setCount(limpas.length);
       return;
     }
 
     // 3. Se o usuário está no card 'Todas' geral sem filtros adicionais de texto/datas
-    if (!s && !status && statusMultiplos.length === 0 && !filtroCliente && !ini && !fim && !venc && !filtroScore && !filtroTelefone && !filtroDivida && !filtroPago && !filtroSaldo) {
+    if (!s && !status && statusMultiplos.length === 0 && !filtroCliente && !ini && !fim && !venc && !filtroScore && !filtroTelefone && !filtroDivida && !filtroPago && !filtroSaldo && !clienteSelecionado) {
       const [r1, r2, r3, r4, rQuit] = await Promise.all([
         supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(0, 999),
         supabase.from("promissorias").select("*").eq("fundo_perdido", false).gt("saldo_devedor", 0).order("updated_at", { ascending: false }).order("id", { ascending: false }).range(1000, 1999),
@@ -284,7 +324,11 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     }
 
     let query = supabase.from("promissorias").select("*", { count: "exact" });
-    if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+    if (clienteSelecionado) {
+      query = query.ilike("cliente_nome", clienteSelecionado.trim());
+    } else if (s) {
+      query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+    }
     if (statusMultiplos.length > 0) {
       const temQuitado = statusMultiplos.includes("QUITADO");
       const temAberto = statusMultiplos.some(st => st === "PAGANDO" || st === "A VENCER" || st === "NÃO PAGOU");
@@ -368,7 +412,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     const { data, count: c, error } = await query.order("id").limit(2000);
     if (error) { setError(error.message); return; }
 
-    const temFiltroRestritivo = Boolean(venc || ini || fim || status || statusMultiplos.length > 0 || filtroScore || filtroDivida || filtroPago || filtroSaldo);
+    const temFiltroRestritivo = Boolean(venc || ini || fim || status || statusMultiplos.length > 0 || filtroScore || filtroDivida || filtroPago || filtroSaldo || clienteSelecionado);
     const nomesAlvo = Array.from(new Set((data || []).map(r => (r.cliente_nome || "").trim()))).filter(Boolean);
 
     if (temFiltroRestritivo && nomesAlvo.length > 0) {
@@ -405,7 +449,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       setRows((data ?? []) as Row[]);
       setCount(c ?? 0);
     }
-  }, [qd, status, statusMultiplos, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo]);
+  }, [qd, status, statusMultiplos, ini, fim, sortCol, sortAsc, venc, filtroCliente, filtroScore, filtroTelefone, filtroDivida, filtroPago, filtroSaldo, clienteSelecionado]);
 
   const toggleStatusMultiplo = (st: Status) => {
     setStatus("");
@@ -436,6 +480,10 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
 
   const clientesConsolidados = useMemo(() => {
     let list = agruparClientesParaListagem(rows);
+    if (clienteSelecionado) {
+      const selNorm = clienteSelecionado.trim().toUpperCase();
+      list = list.filter(cli => cli.cliente_nome.trim().toUpperCase() === selNorm);
+    }
     if (nomesFiltrados && nomesFiltrados.length > 0) {
       const setNomes = new Set(nomesFiltrados);
       list = list.filter(cli => setNomes.has(cli.cliente_nome.trim().toUpperCase()));
@@ -453,7 +501,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       }
     }
     return list;
-  }, [rows, nomesFiltrados, statusMultiplos, status]);
+  }, [rows, nomesFiltrados, statusMultiplos, status, clienteSelecionado]);
 
   const sortedClientes = useMemo(() => {
     return [...clientesConsolidados].sort((a, b) => {
@@ -671,7 +719,7 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   };
 
   const temFiltrosAtivos = Boolean(
-    filtroCliente || filtroScore || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc || statusMultiplos.length > 0
+    filtroCliente || filtroScore || filtroTelefone || filtroDivida || filtroPago || filtroSaldo || status || venc || statusMultiplos.length > 0 || clienteSelecionado
   );
 
   const limparTodosFiltros = () => {
@@ -687,6 +735,10 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setVenc("");
     setSortCol("recente");
     setSortAsc(false);
+    setClienteSelecionado(null);
+    setMostrarSugestoes(false);
+    setQ("");
+    setQd("");
     reset();
   };
 
@@ -698,8 +750,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
     setMenuExportar(false);
     try {
       let query = supabase.from("promissorias").select("*");
-      const s = qd.replace(/[%,()*]/g, " ").trim();
-      if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+      if (clienteSelecionado) {
+        query = query.ilike("cliente_nome", clienteSelecionado.trim());
+      } else {
+        const s = qd.replace(/[%,()*]/g, " ").trim();
+        if (s) query = query.or(`cliente_nome.ilike.%${s}%,telefone.ilike.%${s}%`);
+      }
       const h = hoje();
       if (status === "ABERTO") query = query.eq("fundo_perdido", false).gt("saldo_devedor", 0);
       else if (status === "QUITADO") query = query.eq("fundo_perdido", false).lte("saldo_devedor", 0);
@@ -1214,19 +1270,89 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
         </button>
       </div>
       <div className="bar" style={{ flexWrap: "wrap", gap: 10 }}>
-        <input
-          type="search"
-          placeholder="Buscar por cliente ou telefone"
-          value={q}
-          onChange={e => setQ(e.target.value)}
-          list="lista-clientes-promissorias"
-          autoComplete="off"
-        />
-        <datalist id="lista-clientes-promissorias">
-          {sugestoesBusca.map((s, idx) => (
-            <option key={idx} value={s} />
-          ))}
-        </datalist>
+        <div ref={containerBuscaRef} style={{ position: "relative", display: "inline-flex", flex: "1 1 240px", maxWidth: 360 }}>
+          <input
+            type="search"
+            placeholder="Buscar por cliente ou telefone"
+            value={q}
+            onChange={e => {
+              setQ(e.target.value);
+              if (clienteSelecionado) setClienteSelecionado(null);
+            }}
+            onFocus={() => {
+              if (sugestoesBusca.length > 0 && !clienteSelecionado) {
+                setMostrarSugestoes(true);
+              }
+            }}
+            autoComplete="off"
+            style={{ width: "100%", paddingRight: (q || clienteSelecionado) ? 32 : 10 }}
+          />
+          {(q || clienteSelecionado) && (
+            <button
+              type="button"
+              onClick={handleLimparBusca}
+              title="Limpar busca"
+              style={{
+                position: "absolute",
+                right: 8,
+                top: "50%",
+                transform: "translateY(-50%)",
+                background: "transparent",
+                border: "none",
+                cursor: "pointer",
+                color: "var(--mut)",
+                fontSize: 14,
+                lineHeight: 1,
+                padding: "2px 4px"
+              }}
+            >
+              ✕
+            </button>
+          )}
+          {mostrarSugestoes && sugestoesBusca.length > 0 && (
+            <div
+              style={{
+                position: "absolute",
+                top: "calc(100% + 4px)",
+                left: 0,
+                right: 0,
+                background: "#fff",
+                border: "1px solid #e2e8f0",
+                borderRadius: 8,
+                boxShadow: "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05)",
+                zIndex: 9999,
+                maxHeight: 250,
+                overflowY: "auto",
+              }}
+            >
+              <div style={{ padding: "6px 10px", fontSize: 11, fontWeight: 600, color: "var(--mut)", background: "#f8fafc", borderBottom: "1px solid #f1f5f9" }}>
+                Selecione o cliente:
+              </div>
+              {sugestoesBusca.map((sug, idx) => (
+                <div
+                  key={idx}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    handleSelecionarCliente(sug);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: "var(--ink)",
+                    borderBottom: idx === sugestoesBusca.length - 1 ? "none" : "1px solid #f1f5f9",
+                    transition: "background 0.15s ease",
+                  }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = "#f1f5f9")}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = "transparent")}
+                >
+                  👤 {sug}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         <select
           value={tipoPeriodo}
@@ -1368,6 +1494,12 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       {temFiltrosAtivos && (
         <div className="active-filters-bar">
           <span style={{ fontWeight: 600, color: "var(--mut)" }}>Filtros ativos:</span>
+          {clienteSelecionado && (
+            <span className="filter-chip" style={{ background: "#e0f2fe", color: "#0369a1", borderColor: "#7dd3fc", fontWeight: 600 }}>
+              👤 Mostrando apenas: {clienteSelecionado}
+              <button type="button" onClick={handleLimparBusca} title="Remover filtro de cliente">✕</button>
+            </span>
+          )}
           {filtroCliente && (
             <span className="filter-chip">
               Cliente: {filtroCliente}
