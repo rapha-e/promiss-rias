@@ -920,6 +920,11 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
     };
   }, [dataHoje, modoMeta, metaRecuperacao, metaGlobal, dadosRecuperacao, metricas.totalVencidoValor]);
 
+  const promessasNaoCumpridas = useMemo(() => (promessas || []).filter(p => !p.cumprida), [promessas]);
+  const promessasHoje = useMemo(() => promessasNaoCumpridas.filter(p => p.dataPromessa === dataHoje), [promessasNaoCumpridas, dataHoje]);
+  const promessasHojeTotal = useMemo(() => promessasHoje.reduce((s, p) => s + p.valor, 0), [promessasHoje]);
+  const promessasPosteriores = useMemo(() => promessasNaoCumpridas.filter(p => p.dataPromessa > dataHoje).sort((a, b) => a.dataPromessa.localeCompare(b.dataPromessa)), [promessasNaoCumpridas, dataHoje]);
+
   if (loading) {
     return (
       <div style={{ textAlign: "center", padding: "60px 20px", color: "var(--mut)" }}>
@@ -930,27 +935,46 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   }
 
   return (
-    <div style={{ maxWidth: 1300, margin: "0 auto", paddingBottom: 40 }}>
-      {/* Cabeçalho da Página */}
+    <div style={{ maxWidth: 1360, margin: "0 auto", paddingBottom: 40 }}>
+      {/* Cabeçalho da Página - Visão Executiva Limpa */}
       <div className="head2 noprint" style={{ alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h1 style={{ display: "flex", alignItems: "center", gap: 10, margin: 0 }}>
-            <span>📊</span> Dashboard Operacional & Financeiro
-          </h1>
-          <div className="sub" style={{ marginTop: 4 }}>
-            Visão consolidada em tempo real da inadimplência, aging de vencimentos e desempenho do crediário.
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--ink)" }}>
+              Visão Geral Operacional
+            </h1>
+            <span
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 5,
+                background: "rgba(16, 185, 129, 0.1)",
+                color: "#059669",
+                fontSize: 11.5,
+                fontWeight: 700,
+                padding: "3px 9px",
+                borderRadius: 99,
+                letterSpacing: "0.01em",
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+              Tempo Real
+            </span>
+          </div>
+          <div className="sub" style={{ marginTop: 4, fontSize: 13, color: "var(--mut)" }}>
+            Controle financeiro do crediário, entradas do dia e radar de cobrança prioritária.
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <button
             type="button"
             className="btn ghost"
             onClick={carregarDados}
-            title="Recarregar todos os indicadores"
-            style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+            title="Recarregar todos os dados"
+            style={{ fontSize: 13, padding: "8px 14px", fontWeight: 600 }}
           >
-            <span>🔄</span> Atualizar
+            🔄 Atualizar
           </button>
 
           {/* Dropdown Exportar */}
@@ -959,28 +983,24 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               type="button"
               className="btn"
               onClick={() => setMenuExportar(prev => !prev)}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
+              style={{ fontSize: 13, padding: "8px 15px", fontWeight: 600 }}
             >
-              <span>📥</span> Exportar Relatório ▾
+              📥 Exportar ▾
             </button>
-
             {menuExportar && (
               <>
-                <div
-                  style={{ position: "fixed", inset: 0, zIndex: 90 }}
-                  onClick={() => setMenuExportar(false)}
-                />
+                <div style={{ position: "fixed", inset: 0, zIndex: 90 }} onClick={() => setMenuExportar(false)} />
                 <div
                   style={{
                     position: "absolute",
                     right: 0,
-                    top: "calc(100% + 4px)",
+                    top: "calc(100% + 6px)",
                     background: "var(--card)",
                     border: "1px solid var(--line)",
                     borderRadius: 10,
-                    boxShadow: "0 10px 25px rgba(0,0,0,0.15)",
+                    boxShadow: "0 10px 25px -5px rgba(0,0,0,0.12)",
                     zIndex: 100,
-                    minWidth: 200,
+                    minWidth: 210,
                     padding: 6,
                     display: "flex",
                     flexDirection: "column",
@@ -1003,11 +1023,12 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       textAlign: "left",
                       fontSize: 13,
                       fontWeight: 600,
+                      color: "var(--ink)",
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = "var(--soft)")}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
-                    <span>📗</span> Exportar para Excel (.csv)
+                    <span>📗</span> Planilha Excel (.csv)
                   </button>
                   <button
                     type="button"
@@ -1025,11 +1046,12 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       textAlign: "left",
                       fontSize: 13,
                       fontWeight: 600,
+                      color: "var(--ink)",
                     }}
                     onMouseEnter={e => (e.currentTarget.style.background = "var(--soft)")}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
-                    <span>📕</span> Exportar para PDF / Imprimir
+                    <span>📕</span> Relatório PDF / Imprimir
                   </button>
                 </div>
               </>
@@ -1040,165 +1062,255 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
 
       {error && <div className="warn" style={{ marginBottom: 20 }}>Erro: {error}</div>}
 
-      {/* BLOCO 1: KPIs Principais de Governança Financeira */}
+      {/* 4 CARDS KPIS EXECUTIVOS */}
       <section className="kpis" style={{ marginBottom: 22 }}>
         {/* Card 1: Saldo a Receber */}
-        <div className="card hl" style={{ borderLeftWidth: 4, borderLeftColor: "var(--brand)" }}>
-          <small style={{ textTransform: "uppercase", letterSpacing: ".05em" }}>Saldo a Receber Ativo</small>
-          <b style={{ fontSize: 24 }}>{money(metricas.totalSaldo)}</b>
-          <div className="ksub">
-            {abertas.length.toLocaleString("pt-BR")} promissórias de {metricas.clientesComSaldo.toLocaleString("pt-BR")} clientes
+        <div className="card" style={{ borderLeft: "4px solid var(--brand)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <small>CARTEIRA ATIVA (SALDO)</small>
+            <span style={{ fontSize: 11.5, color: "var(--mut)", fontWeight: 600 }}>
+              {metricas.clientesComSaldo.toLocaleString("pt-BR")} clientes
+            </span>
+          </div>
+          <b>{money(metricas.totalSaldo)}</b>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
+            {abertas.length.toLocaleString("pt-BR")} promissórias em aberto
           </div>
         </div>
 
-        {/* Card 2: Inadimplência Global (Destaque Crítico) */}
-        <div
-          className="card"
-          style={{
-            borderLeftWidth: 4,
-            borderLeftColor: metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--warn)",
-            background: "color-mix(in srgb, var(--card) 92%, var(--soft))",
-          }}
-        >
+        {/* Card 2: Arrecadação no Mês */}
+        <div className="card" style={{ borderLeft: "4px solid #10b981" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <small style={{ textTransform: "uppercase", letterSpacing: ".05em" }}>Inadimplência Global</small>
-            <span
-              style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--warn)",
-                background: metricas.taxaInadimplencia > 30 ? "rgba(180, 35, 24, 0.1)" : "rgba(217, 119, 6, 0.1)",
-                padding: "2px 8px",
-                borderRadius: 99,
-              }}
-            >
+            <small>ARRECADADO NO MÊS</small>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#059669",
+              background: "rgba(16, 185, 129, 0.1)",
+              padding: "2px 7px",
+              borderRadius: 99,
+            }}>
+              {metaInfo.pct.toFixed(0)}% da meta
+            </span>
+          </div>
+          <b style={{ color: "#059669" }}>{money(dadosRecuperacao.totalCaixa)}</b>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
+            Meta: {money(metaInfo.metaAtiva)} ({metaInfo.nomeMes})
+          </div>
+        </div>
+
+        {/* Card 3: Inadimplência em Atraso */}
+        <div className="card" style={{
+          borderLeft: `4px solid ${metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--warn)"}`,
+        }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+            <small>INADIMPLÊNCIA VENCIDA</small>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--warn)",
+              background: metricas.taxaInadimplencia > 30 ? "rgba(220, 38, 38, 0.1)" : "rgba(217, 119, 6, 0.1)",
+              padding: "2px 7px",
+              borderRadius: 99,
+            }}>
               {metricas.taxaInadimplencia.toFixed(1)}% do saldo
             </span>
           </div>
-          <b style={{ fontSize: 24, color: metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--ink)" }}>
+          <b style={{ color: metricas.taxaInadimplencia > 30 ? "var(--bad)" : "var(--ink)" }}>
             {money(metricas.totalVencidoValor)}
           </b>
-          <div className="ksub" style={{ color: "var(--bad)" }}>
+          <div style={{ fontSize: 12, color: "var(--bad)", marginTop: 4 }}>
             {metricas.totalVencidoQtd.toLocaleString("pt-BR")} promissórias em atraso
           </div>
         </div>
 
-        {/* Card 3: Total de Venda */}
-        <div className="card">
-          <small style={{ textTransform: "uppercase", letterSpacing: ".05em" }}>Total de Venda (Carteira)</small>
-          <b style={{ fontSize: 24 }}>{money(metricas.totalDivida)}</b>
-          <div className="ksub">
-            Ticket médio: {money(metricas.ticketMedioVenda)}
-          </div>
-        </div>
-
-        {/* Card 4: Total Quitado & Eficiência */}
-        <div className="card">
+        {/* Card 4: Entradas Previstas Hoje */}
+        <div className="card" style={{ borderLeft: "4px solid #0284c7" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-            <small style={{ textTransform: "uppercase", letterSpacing: ".05em" }}>Total Quitado</small>
-            <span style={{ fontSize: 12, fontWeight: 700, color: "var(--brand)" }}>
-              {metricas.taxaLiquidacao.toFixed(1)}% quitado
+            <small>ENTRADAS PREVISTAS HOJE</small>
+            <span style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: "#0284c7",
+              background: "rgba(2, 132, 199, 0.1)",
+              padding: "2px 7px",
+              borderRadius: 99,
+            }}>
+              {promessasHoje.length} promessas
             </span>
           </div>
-          <b style={{ fontSize: 24, color: "var(--brand)" }}>{money(metricas.totalPago)}</b>
-          <div className="ksub">
-            Recuperado / recebido em caixa
+          <b style={{ color: "#0284c7" }}>{money(metricas.hojeValor + promessasHojeTotal)}</b>
+          <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 4 }}>
+            {metricas.hojeQtd > 0 ? `${money(metricas.hojeValor)} em vencimentos de hoje` : "Agendados e vencimentos de hoje"}
           </div>
         </div>
       </section>
 
-      {/* BLOCO EXTRA: META MENSAL DE RECUPERAÇÃO & PROMESSAS DE HOJE */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 14, marginBottom: 22 }}>
-        {/* Card Meta Mensal com Inteligência de Inadimplência & Aging */}
-        <div className="card" style={{ padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
-          {/* Topo: Título + Botão Editar */}
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-            <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em" }}>
-              {modoMeta === "inadimplentes" ? "🎯 Meta de Inadimplência Recuperada" : "💰 Meta de Arrecadação Global (Caixa)"} • {metaInfo.nomeMes}
-            </span>
-            <button
-              type="button"
-              className="btn ghost"
-              style={{ fontSize: 11, padding: "2px 8px" }}
-              onClick={() => {
-                if (editandoMeta) {
-                  const val = desmascararMoeda(novaMetaStr);
-                  if (val > 0) {
-                    if (modoMeta === "inadimplentes") {
-                      setMetaRecuperacao(val);
-                      try { localStorage.setItem(META_RECUPERACAO_KEY, String(val)); } catch {}
-                    } else {
-                      setMetaGlobal(val);
-                      try { localStorage.setItem(META_GLOBAL_KEY, String(val)); } catch {}
-                    }
-                  }
-                  setEditandoMeta(false);
-                } else {
-                  setNovaMetaStr(formatarMascaraMoeda(metaInfo.metaAtiva));
-                  setEditandoMeta(true);
-                }
-              }}
-            >
-              {editandoMeta ? "Fechar" : "Editar Meta"}
-            </button>
+      {/* GRID DINÂMICO DE 2 COLUNAS (60% / 40%) */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 18, marginBottom: 24, alignItems: "start" }}>
+        
+        {/* COLUNA ESQUERDA: Fluxo Financeiro & Metas */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          
+          {/* Card: Fluxo de Caixa / Recebimentos Recentes */}
+          <div
+            className="card"
+            style={{
+              padding: "20px 22px",
+              background: "var(--card)",
+              borderRadius: 14,
+              border: "1px solid var(--line)",
+              boxShadow: "var(--shadow-xs)",
+            }}
+          >
+            {/* Topo do Card */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+                  FLUXO DE CAIXA
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                  Recebimentos recentes
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => carregarRecebimentosRecentes()}
+                style={{ padding: "4px 8px", fontSize: 16, color: "var(--mut)", borderRadius: 6, lineHeight: 1 }}
+                title="Atualizar recebimentos"
+              >
+                ⋯
+              </button>
+            </div>
+
+            {/* Lista dos 5 últimos recebimentos */}
+            {loadingRecebimentos && recebimentos.length === 0 ? (
+              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+                Carregando recebimentos…
+              </div>
+            ) : recebimentos.length === 0 ? (
+              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+                Nenhum recebimento registrado recentemente.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                {recebimentos.slice(0, 5).map((rec, idx, arr) => (
+                  <div
+                    key={rec.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "11px 0",
+                      borderBottom: idx === arr.length - 1 ? "none" : "1px solid var(--line)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: "50%",
+                          backgroundColor: rec.corAvatar,
+                          color: "#ffffff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 700,
+                          fontSize: 12.5,
+                          letterSpacing: "0.02em",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {rec.iniciais}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13.5,
+                            color: "var(--ink)",
+                            whiteSpace: "nowrap",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            cursor: "pointer",
+                          }}
+                          title={rec.clienteNome}
+                          onClick={() => setFichaCliente({ cliente: rec.clienteNome, telefone: rec.telefone })}
+                        >
+                          {rec.clienteNome}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
+                          {rec.descricao}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>
+                        {money(rec.valor)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
+                        {rec.tempoRelativo}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ paddingTop: 12, marginTop: 4, borderTop: recebimentos.length > 0 ? "1px solid var(--line)" : "none" }}>
+              <button
+                type="button"
+                onClick={() => setModalTodosRecebimentos(true)}
+                style={{
+                  background: "none",
+                  border: "none",
+                  padding: 0,
+                  color: "var(--ink)",
+                  fontWeight: 700,
+                  fontSize: 12.5,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  cursor: "pointer",
+                }}
+              >
+                Ver todos os recebimentos ↗
+              </button>
+            </div>
           </div>
 
-          {/* Seletor de Modo (Ideia 4: Inadimplentes vs Global) */}
-          <div style={{ display: "flex", background: "var(--soft)", padding: 3, borderRadius: 8, gap: 4, alignSelf: "flex-start" }}>
-            <button
-              type="button"
-              style={{
-                border: "none",
-                cursor: "pointer",
-                fontSize: 11.5,
-                fontWeight: modoMeta === "inadimplentes" ? 700 : 500,
-                padding: "4px 10px",
-                borderRadius: 6,
-                background: modoMeta === "inadimplentes" ? "var(--card)" : "transparent",
-                color: modoMeta === "inadimplentes" ? "var(--brand)" : "var(--mut)",
-                boxShadow: modoMeta === "inadimplentes" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                transition: "all .15s ease",
-              }}
-              onClick={() => {
-                setModoMeta("inadimplentes");
-                try { localStorage.setItem(MODO_META_KEY, "inadimplentes"); } catch {}
-              }}
-            >
-              🎯 Inadimplência Recuperada
-            </button>
-            <button
-              type="button"
-              style={{
-                border: "none",
-                cursor: "pointer",
-                fontSize: 11.5,
-                fontWeight: modoMeta === "global" ? 700 : 500,
-                padding: "4px 10px",
-                borderRadius: 6,
-                background: modoMeta === "global" ? "var(--card)" : "transparent",
-                color: modoMeta === "global" ? "var(--brand)" : "var(--mut)",
-                boxShadow: modoMeta === "global" ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-                transition: "all .15s ease",
-              }}
-              onClick={() => {
-                setModoMeta("global");
-                try { localStorage.setItem(MODO_META_KEY, "global"); } catch {}
-              }}
-            >
-              💰 Arrecadação Global (Caixa)
-            </button>
-          </div>
-
-          {/* Edição ou Exibição da Meta */}
-          {editandoMeta ? (
-            <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input
-                type="text"
-                autoFocus
-                value={novaMetaStr}
-                onChange={e => setNovaMetaStr(formatarMascaraMoeda(e.target.value))}
-                onKeyDown={e => {
-                  if (e.key === "Enter") {
+          {/* Card: Desempenho de Metas do Mês (Clean & Funcional) */}
+          <div
+            className="card"
+            style={{
+              padding: "20px 22px",
+              background: "var(--card)",
+              borderRadius: 14,
+              border: "1px solid var(--line)",
+              boxShadow: "var(--shadow-xs)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+                  META MENSAL DE CRÉDITO • {metaInfo.nomeMes}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                  {modoMeta === "inadimplentes" ? "Recuperação de Inadimplência" : "Arrecadação Global"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 8 }}
+                onClick={() => {
+                  if (editandoMeta) {
                     const val = desmascararMoeda(novaMetaStr);
                     if (val > 0) {
                       if (modoMeta === "inadimplentes") {
@@ -1210,610 +1322,323 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       }
                     }
                     setEditandoMeta(false);
-                  } else if (e.key === "Escape") {
-                    setEditandoMeta(false);
+                  } else {
+                    setNovaMetaStr(formatarMascaraMoeda(metaInfo.metaAtiva));
+                    setEditandoMeta(true);
                   }
                 }}
-                placeholder="R$ 0,00"
-                style={{
-                  flex: 1,
-                  padding: "6px 10px",
-                  fontSize: 14,
-                  fontWeight: 700,
-                  borderRadius: 6,
-                  border: "1px solid var(--brand)",
-                  background: "var(--bg)",
-                  color: "var(--fg)",
-                  fontFamily: "monospace",
-                }}
-              />
-              <button
-                type="button"
-                className="btn primary"
-                style={{ fontSize: 12, padding: "6px 12px" }}
-                onClick={() => {
-                  const val = desmascararMoeda(novaMetaStr);
-                  if (val > 0) {
-                    if (modoMeta === "inadimplentes") {
-                      setMetaRecuperacao(val);
-                      try { localStorage.setItem(META_RECUPERACAO_KEY, String(val)); } catch {}
-                    } else {
-                      setMetaGlobal(val);
-                      try { localStorage.setItem(META_GLOBAL_KEY, String(val)); } catch {}
-                    }
-                  }
-                  setEditandoMeta(false);
-                }}
               >
-                Salvar
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                style={{ fontSize: 12, padding: "6px 10px" }}
-                onClick={() => setEditandoMeta(false)}
-              >
-                Cancelar
+                {editandoMeta ? "Fechar" : "Editar Meta"}
               </button>
             </div>
-          ) : (
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <div>
-                <b style={{ fontSize: 24 }}>{money(metaInfo.metaAtiva)}</b>
-                <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>
-                  {modoMeta === "inadimplentes" ? "alvo de recuperação" : "alvo de faturamento"}
+
+            {/* Seletor de modo simplificado */}
+            <div style={{ display: "flex", background: "var(--soft)", padding: 3, borderRadius: 8, gap: 4, width: "fit-content" }}>
+              <button
+                type="button"
+                onClick={() => { setModoMeta("inadimplentes"); try { localStorage.setItem(MODO_META_KEY, "inadimplentes"); } catch {} }}
+                style={{
+                  border: 0,
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  fontWeight: modoMeta === "inadimplentes" ? 700 : 500,
+                  background: modoMeta === "inadimplentes" ? "var(--card)" : "transparent",
+                  color: modoMeta === "inadimplentes" ? "var(--brand)" : "var(--mut)",
+                  boxShadow: modoMeta === "inadimplentes" ? "var(--shadow-xs)" : "none",
+                }}
+              >
+                Recuperação Inadimplentes
+              </button>
+              <button
+                type="button"
+                onClick={() => { setModoMeta("global"); try { localStorage.setItem(MODO_META_KEY, "global"); } catch {} }}
+                style={{
+                  border: 0,
+                  cursor: "pointer",
+                  fontSize: 11.5,
+                  padding: "4px 10px",
+                  borderRadius: 6,
+                  fontWeight: modoMeta === "global" ? 700 : 500,
+                  background: modoMeta === "global" ? "var(--card)" : "transparent",
+                  color: modoMeta === "global" ? "var(--brand)" : "var(--mut)",
+                  boxShadow: modoMeta === "global" ? "var(--shadow-xs)" : "none",
+                }}
+              >
+                Caixa Global
+              </button>
+            </div>
+
+            {/* Progresso visual */}
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+                <div>
+                  <span style={{ fontSize: 22, fontWeight: 800, color: "var(--ink)" }}>{money(metaInfo.valorAtivo)}</span>
+                  <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>de {money(metaInfo.metaAtiva)}</span>
+                </div>
+                <span style={{ fontSize: 13, fontWeight: 700, color: metaInfo.pct >= 100 ? "#10b981" : "#0f766e" }}>
+                  {metaInfo.pct.toFixed(1)}% atingido
                 </span>
               </div>
-              <span style={{
-                fontSize: 13,
-                fontWeight: 700,
-                color: metaInfo.pct >= 100 ? "#10b981" : metaInfo.pct >= 70 ? "#0284c7" : "#d97706",
-              }}>
-                {metaInfo.pct.toFixed(1)}% da meta
-              </span>
-            </div>
-          )}
-
-          {/* Barra de Progresso da Meta */}
-          <div style={{ height: 10, width: "100%", background: "var(--line)", borderRadius: 99, overflow: "hidden" }}>
-            <div
-              style={{
-                height: "100%",
-                width: `${Math.min(100, Math.max(0, metaInfo.pct))}%`,
-                background: metaInfo.pct >= 100
-                  ? "linear-gradient(90deg, #10b981, #059669)"
-                  : metaInfo.pct >= 70
-                  ? "linear-gradient(90deg, #0284c7, #10b981)"
-                  : "linear-gradient(90deg, #f59e0b, #10b981)",
-                borderRadius: 99,
-                transition: "width .4s ease",
-              }}
-            />
-          </div>
-
-          {/* Valores Recuperado e Restante */}
-          <div style={{ fontSize: 12, color: "var(--mut)", display: "flex", justifyContent: "space-between" }}>
-            <span>
-              {modoMeta === "inadimplentes" ? "Inadimplência Recuperada:" : "Entradas em Caixa:"}{" "}
-              <b style={{ color: "var(--fg)" }}>{money(metaInfo.valorAtivo)}</b>
-            </span>
-            <span>
-              Restante: <b style={{ color: "var(--fg)" }}>{money(Math.max(0, metaInfo.metaAtiva - metaInfo.valorAtivo))}</b>
-            </span>
-          </div>
-
-          {/* Ideia 3: Taxa de Resgate da Inadimplência */}
-          <div style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "rgba(16, 185, 129, 0.08)",
-            border: "1px solid rgba(16, 185, 129, 0.25)",
-            borderRadius: 8,
-            padding: "8px 10px",
-            fontSize: 11.5,
-          }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span>🛡️</span>
-              <span><b>Taxa de Resgate:</b> {metaInfo.taxaResgate.toFixed(1)}% da inadimplência resgatada</span>
-            </span>
-            <span style={{ color: "var(--mut)", fontSize: 11 }}>
-              {money(dadosRecuperacao.totalInadimplencia)} de {money(metaInfo.poolVencido)}
-            </span>
-          </div>
-
-          {/* Ideia 2: Composição da Recuperação por Idade da Dívida */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 2 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: ".04em", color: "var(--mut)" }}>
-                📊 Idade da Dívida Recuperada (Aging)
-              </span>
-              <span style={{ fontSize: 10.5, color: "var(--mut)" }}>
-                {modoMeta === "inadimplentes" ? "Base: dívidas vencidas" : "Entradas totais"}
-              </span>
+              <div style={{ height: 8, width: "100%", background: "var(--line)", borderRadius: 99, overflow: "hidden" }}>
+                <div
+                  style={{
+                    height: "100%",
+                    width: `${Math.min(100, Math.max(0, metaInfo.pct))}%`,
+                    background: metaInfo.pct >= 100 ? "#10b981" : "linear-gradient(90deg, #0f766e, #14b8a6)",
+                    borderRadius: 99,
+                    transition: "width .4s ease",
+                  }}
+                />
+              </div>
             </div>
 
-            {/* Barra Multi-colorida Proporcional das Faixas */}
-            {dadosRecuperacao.totalInadimplencia > 0 && (
-              <div style={{ height: 8, width: "100%", background: "var(--line)", borderRadius: 99, display: "flex", overflow: "hidden" }}>
-                {dadosRecuperacao.faixas.ate30 > 0 && (
-                  <div
-                    title={`Até 30 dias: ${money(dadosRecuperacao.faixas.ate30)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.ate30 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#10b981" }}
-                  />
-                )}
-                {dadosRecuperacao.faixas.d30a60 > 0 && (
-                  <div
-                    title={`30 a 60 dias: ${money(dadosRecuperacao.faixas.d30a60)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.d30a60 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#0284c7" }}
-                  />
-                )}
-                {dadosRecuperacao.faixas.d60a90 > 0 && (
-                  <div
-                    title={`60 a 90 dias: ${money(dadosRecuperacao.faixas.d60a90)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.d60a90 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#f59e0b" }}
-                  />
-                )}
-                {dadosRecuperacao.faixas.d90a180 > 0 && (
-                  <div
-                    title={`90 a 180 dias: ${money(dadosRecuperacao.faixas.d90a180)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.d90a180 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#ea580c" }}
-                  />
-                )}
-                {dadosRecuperacao.faixas.mais180 > 0 && (
-                  <div
-                    title={`+180 dias: ${money(dadosRecuperacao.faixas.mais180)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.mais180 / (modoMeta === "inadimplentes" ? dadosRecuperacao.totalInadimplencia : dadosRecuperacao.totalCaixa)) * 100}%`, background: "#9333ea" }}
-                  />
-                )}
-                {modoMeta === "global" && dadosRecuperacao.faixas.emDia > 0 && (
-                  <div
-                    title={`Em dia: ${money(dadosRecuperacao.faixas.emDia)}`}
-                    style={{ width: `${(dadosRecuperacao.faixas.emDia / dadosRecuperacao.totalCaixa) * 100}%`, background: "#06b6d4" }}
-                  />
-                )}
+            {/* Métricas-chave em linha */}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--mut)" }}>Média diária</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>{money(metaInfo.mediaDiaria)}/dia</div>
               </div>
-            )}
-
-            {/* Grid com os 5 cards/pills com as margens solicitadas */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(115px, 1fr))", gap: 6, marginTop: 4 }}>
-              <div style={{ background: "rgba(16, 185, 129, 0.08)", border: "1px solid rgba(16, 185, 129, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#10b981", textTransform: "uppercase" }}>Até 30 dias</div>
-                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.ate30)}</b>
-              </div>
-              <div style={{ background: "rgba(2, 132, 199, 0.08)", border: "1px solid rgba(2, 132, 199, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#0284c7", textTransform: "uppercase" }}>30 a 60 dias</div>
-                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d30a60)}</b>
-              </div>
-              <div style={{ background: "rgba(245, 158, 11, 0.08)", border: "1px solid rgba(245, 158, 11, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#f59e0b", textTransform: "uppercase" }}>60 a 90 dias</div>
-                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d60a90)}</b>
-              </div>
-              <div style={{ background: "rgba(234, 88, 12, 0.08)", border: "1px solid rgba(234, 88, 12, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#ea580c", textTransform: "uppercase" }}>90 a 180 dias</div>
-                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.d90a180)}</b>
-              </div>
-              <div style={{ background: "rgba(147, 51, 234, 0.08)", border: "1px solid rgba(147, 51, 234, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                <div style={{ fontSize: 10, fontWeight: 700, color: "#9333ea", textTransform: "uppercase" }}>+180 dias (Antigas)</div>
-                <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.mais180)}</b>
-              </div>
-              {modoMeta === "global" && (
-                <div style={{ background: "rgba(6, 182, 212, 0.08)", border: "1px solid rgba(6, 182, 212, 0.3)", borderRadius: 7, padding: "5px 7px" }}>
-                  <div style={{ fontSize: 10, fontWeight: 700, color: "#06b6d4", textTransform: "uppercase" }}>Em dia / Adiant.</div>
-                  <b style={{ fontSize: 12.5, color: "var(--fg)" }}>{money(dadosRecuperacao.faixas.emDia)}</b>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--mut)" }}>Projeção no mês</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: metaInfo.projecaoFechamento >= metaInfo.metaAtiva ? "#059669" : "var(--ink)", marginTop: 2 }}>
+                  {money(metaInfo.projecaoFechamento)}
                 </div>
-              )}
+              </div>
+              <div>
+                <div style={{ fontSize: 11, color: "var(--mut)" }}>Taxa de resgate</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "#059669", marginTop: 2 }}>
+                  {metaInfo.taxaResgate.toFixed(1)}% do vencido
+                </div>
+              </div>
             </div>
-          </div>
-
-          {/* Rodapé: Ritmo Diário e Projeção de Fechamento */}
-          <div style={{
-            fontSize: 11,
-            color: "var(--mut)",
-            paddingTop: 8,
-            borderTop: "1px dashed var(--line)",
-            display: "flex",
-            justifyContent: "space-between",
-            flexWrap: "wrap",
-            gap: 6,
-          }}>
-            <span>Média: <b>{money(metaInfo.mediaDiaria)}/dia</b></span>
-            <span>
-              Projeção: <b style={{ color: metaInfo.projecaoFechamento >= metaInfo.metaAtiva ? "#10b981" : "inherit" }}>{money(metaInfo.projecaoFechamento)}</b> ({metaInfo.diasRestantes} dias rest.)
-            </span>
-            {modoMeta === "inadimplentes" && (
-              <span style={{ width: "100%", fontSize: 10.5, color: "var(--mut)", borderTop: "1px solid var(--soft)", paddingTop: 4 }}>
-                💳 Total em caixa no mês: <b>{money(dadosRecuperacao.totalCaixa)}</b> ({money(dadosRecuperacao.faixas.emDia)} em dia)
-              </span>
-            )}
           </div>
         </div>
 
-        {/* Card Promessas de Pagamento (Dividido em Promessas para Hoje e Datas Posteriores) */}
-        {(() => {
-          const promessasNaoCumpridas = (promessas || []).filter(p => !p.cumprida);
-          const promessasHoje = promessasNaoCumpridas.filter(p => p.dataPromessa === dataHoje);
-          const promessasPosteriores = promessasNaoCumpridas
-            .filter(p => p.dataPromessa > dataHoje)
-            .sort((a, b) => a.dataPromessa.localeCompare(b.dataPromessa));
-          const promessasAtrasadas = promessasNaoCumpridas.filter(p => p.dataPromessa < dataHoje);
-
-          const totalPrometidoHoje = promessasHoje.reduce((s, p) => s + p.valor, 0);
-          const totalPrometidoPosterior = promessasPosteriores.reduce((s, p) => s + p.valor, 0);
-
-          return (
-            <div
-              className="card"
-              style={{
-                padding: 16,
-                borderLeft: "5px solid #d97706",
-                display: "flex",
-                flexDirection: "column",
-                gap: 14,
-                background: promessasHoje.length > 0 ? "rgba(217, 119, 6, 0.03)" : "var(--card)",
-              }}
-            >
-              {/* SEÇÃO 1: PROMESSAS PARA HOJE */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#d97706", display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>📅</span> PROMESSAS PARA HOJE ({promessasHoje.length})
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--mut)" }}>{dt(dataHoje)}</span>
+        {/* COLUNA DIREITA: Ações Operacionais & Radar de Cobrança */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          
+          {/* Card: Promessas para Hoje (Ação Rápida) */}
+          <div
+            className="card"
+            style={{
+              padding: "20px 22px",
+              background: "var(--card)",
+              borderRadius: 14,
+              border: "1px solid var(--line)",
+              borderTop: "3px solid #d97706",
+              boxShadow: "var(--shadow-xs)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#d97706", textTransform: "uppercase" }}>
+                  AÇÃO IMEDIATA
                 </div>
-
-                {promessasHoje.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--mut)", padding: "4px 0" }}>
-                    Nenhuma promessa de pagamento para hoje.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {promessasHoje.map(p => (
-                      <div
-                        key={p.id}
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          fontSize: 12.5,
-                          padding: "8px 10px",
-                          background: "var(--card)",
-                          borderRadius: 8,
-                          border: "1px solid var(--line)",
-                          boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-                        }}
-                      >
-                        <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
-                          <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{p.cliente}</div>
-                          <div style={{ color: "var(--mut)", fontSize: 11, marginTop: 1 }}>{p.telefone ? mascaraTelefone(p.telefone) : "Sem tel"}</div>
-                          {p.observacao && (
-                            <div style={{ fontSize: 11, color: "var(--brand)", marginTop: 2, fontStyle: "italic", wordBreak: "break-word" }}>
-                              Obs: {p.observacao}
-                            </div>
-                          )}
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                          <span style={{ fontWeight: 700, color: "#d97706", fontSize: 13 }}>{money(p.valor)}</span>
-                          {p.telefone && (
-                            <button
-                              type="button"
-                              className="btn-baixa"
-                              style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
-                              onClick={() =>
-                                setWhats({
-                                  cliente: p.cliente,
-                                  telefone: p.telefone,
-                                  valor: p.valor,
-                                })
-                              }
-                              title="Cobrar promessa no WhatsApp"
-                            >
-                              Cobrar
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn ghost"
-                            style={{ padding: "3px 8px", fontSize: 11 }}
-                            onClick={() => handleCumprirPromessaDashboard(p.id)}
-                            title="Marcar como cumprida"
-                          >
-                            ✓
-                          </button>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div style={{ fontSize: 11.5, color: "#d97706", fontWeight: 600 }}>
-                  Total prometido para hoje: <b>{money(totalPrometidoHoje)}</b>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                  Promessas de Hoje ({promessasHoje.length})
                 </div>
               </div>
-
-              {/* DIVISOR ELEGANTE */}
-              <div style={{ borderTop: "1px dashed var(--line)" }} />
-
-              {/* SEÇÃO 2: DEMAIS PROMESSAS (DATAS POSTERIORES) */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em", color: "#0284c7", display: "flex", alignItems: "center", gap: 6 }}>
-                    <span>🗓️</span> DEMAIS PROMESSAS (DATAS POSTERIORES) ({promessasPosteriores.length})
-                  </span>
-                  <span style={{ fontSize: 11, color: "var(--mut)" }}>
-                    Total: <b>{money(totalPrometidoPosterior)}</b>
-                  </span>
-                </div>
-
-                {promessasPosteriores.length === 0 ? (
-                  <div style={{ fontSize: 12, color: "var(--mut)", padding: "4px 0" }}>
-                    Nenhuma promessa futura cadastrada.
-                  </div>
-                ) : (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {promessasPosteriores.map(p => {
-                      const tHoje = new Date(dataHoje + "T00:00:00Z").getTime();
-                      const tData = new Date(p.dataPromessa + "T00:00:00Z").getTime();
-                      const diffDias = Math.round((tData - tHoje) / 86400000);
-                      const labelPrazo = diffDias === 1 ? "Amanhã" : `Em ${diffDias} dias`;
-
-                      return (
-                        <div
-                          key={p.id}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            fontSize: 12.5,
-                            padding: "8px 10px",
-                            background: "var(--card)",
-                            borderRadius: 8,
-                            border: "1px solid var(--line)",
-                            boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
-                          }}
-                        >
-                          <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-                              <span style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)" }}>{p.cliente}</span>
-                              <span
-                                className="pill"
-                                style={{
-                                  fontSize: 10.5,
-                                  padding: "1px 6px",
-                                  background: "rgba(2, 132, 199, 0.1)",
-                                  color: "#0369a1",
-                                  borderColor: "#0284c7",
-                                }}
-                              >
-                                {labelPrazo} ({dt(p.dataPromessa)})
-                              </span>
-                            </div>
-                            <div style={{ color: "var(--mut)", fontSize: 11, marginTop: 1 }}>{p.telefone ? mascaraTelefone(p.telefone) : "Sem tel"}</div>
-                            {p.observacao && (
-                              <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2, fontStyle: "italic", wordBreak: "break-word" }}>
-                                Obs: {p.observacao}
-                              </div>
-                            )}
-                          </div>
-                          <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                            <span style={{ fontWeight: 700, color: "#0284c7", fontSize: 13 }}>{money(p.valor)}</span>
-                            {p.telefone && (
-                              <button
-                                type="button"
-                                className="btn-baixa"
-                                style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
-                                onClick={() =>
-                                  setWhats({
-                                    cliente: p.cliente,
-                                    telefone: p.telefone,
-                                    valor: p.valor,
-                                  })
-                                }
-                                title="Cobrar promessa no WhatsApp"
-                              >
-                                Cobrar
-                              </button>
-                            )}
-                            <button
-                              type="button"
-                              className="btn ghost"
-                              style={{ padding: "3px 8px", fontSize: 11 }}
-                              onClick={() => handleCumprirPromessaDashboard(p.id)}
-                              title="Marcar como cumprida"
-                            >
-                              ✓
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* RODAPÉ DO CARD */}
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  paddingTop: 8,
-                  borderTop: "1px solid var(--line)",
-                  fontSize: 11.5,
-                  marginTop: "auto",
-                }}
-              >
-                {promessasAtrasadas.length > 0 ? (
-                  <span style={{ color: "var(--bad)", fontWeight: 600 }}>
-                    ⚠️ {promessasAtrasadas.length} em atraso anterior
-                  </span>
-                ) : (
-                  <span style={{ color: "var(--mut)" }}>
-                    {promessasNaoCumpridas.length} compromisso{promessasNaoCumpridas.length > 1 ? "s" : ""} ativo{promessasNaoCumpridas.length > 1 ? "s" : ""}
-                  </span>
-                )}
-
-                {onNavegarAba && (
-                  <button
-                    type="button"
-                    className="link-cli"
-                    onClick={() => onNavegarAba("promessas")}
-                    style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
-                  >
-                    Ver Central de Promessas →
-                  </button>
-                )}
-              </div>
+              {onNavegarAba && (
+                <button
+                  type="button"
+                  className="link-cli"
+                  onClick={() => onNavegarAba("promessas")}
+                  style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
+                >
+                  Central →
+                </button>
+              )}
             </div>
-          );
-        })()}
+
+            {promessasHoje.length === 0 ? (
+              <div style={{ padding: "18px 0", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+                ✨ Nenhuma promessa agendada para hoje.
+                <div style={{ marginTop: 4, fontSize: 11.5 }}>
+                  {promessasPosteriores.length} compromissos agendados nos próximos dias.
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {promessasHoje.slice(0, 5).map(p => (
+                  <div
+                    key={p.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "9px 12px",
+                      background: "var(--soft)",
+                      borderRadius: 10,
+                      border: "1px solid var(--line)",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {p.cliente}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
+                        {p.telefone ? mascaraTelefone(p.telefone) : "Sem telefone"} {p.observacao ? `· ${p.observacao}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontWeight: 700, color: "#0284c7", fontSize: 13.5 }}>{money(p.valor)}</span>
+                      {p.telefone && (
+                        <button
+                          type="button"
+                          className="btn-baixa"
+                          style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                          onClick={() => setWhats({ cliente: p.cliente, telefone: p.telefone, valor: p.valor })}
+                          title="Cobrar no WhatsApp"
+                        >
+                          Cobrar
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        style={{ padding: "3px 8px", fontSize: 11 }}
+                        onClick={() => handleCumprirPromessaDashboard(p.id)}
+                        title="Marcar como cumprida"
+                      >
+                        ✓
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Card: Top 5 Clientes com Maior Saldo Vencido */}
+          <div
+            className="card"
+            style={{
+              padding: "20px 22px",
+              background: "var(--card)",
+              borderRadius: 14,
+              border: "1px solid var(--line)",
+              boxShadow: "var(--shadow-xs)",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--bad)", textTransform: "uppercase" }}>
+                  PRIORIDADE DE RECUPERAÇÃO
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                  Top Devedores Vencidos
+                </div>
+              </div>
+              {onNavegarAba && (
+                <button
+                  type="button"
+                  className="link-cli"
+                  onClick={() => onNavegarAba("promissorias", "vencidas")}
+                  style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
+                >
+                  Ver todos →
+                </button>
+              )}
+            </div>
+
+            {topDevedores.length === 0 ? (
+              <div style={{ padding: "18px 0", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+                🎉 Nenhuma promissória vencida no momento!
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {topDevedores.slice(0, 5).map(td => (
+                  <div
+                    key={td.cliente}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "8px 10px",
+                      background: "var(--soft)",
+                      borderRadius: 10,
+                      border: "1px solid var(--line)",
+                    }}
+                  >
+                    <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
+                      <div
+                        style={{
+                          fontWeight: 700,
+                          fontSize: 13,
+                          color: "var(--ink)",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => setFichaCliente({ cliente: td.cliente, telefone: td.telefone })}
+                        title="Ver ficha do cliente"
+                      >
+                        {td.cliente}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--bad)", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>
+                        <span>⚠️ {td.maiorAtrasoDias} dias de atraso</span>
+                        <span>• {td.qtdPromissorias} {td.qtdPromissorias === 1 ? "título" : "títulos"}</span>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+                      <span style={{ fontWeight: 700, color: "var(--bad)", fontSize: 13.5 }}>{money(td.totalVencido)}</span>
+                      <button
+                        type="button"
+                        className="btn ghost"
+                        style={{ padding: "3px 7px", fontSize: 11 }}
+                        onClick={() => setFichaCliente({ cliente: td.cliente, telefone: td.telefone })}
+                      >
+                        Ficha
+                      </button>
+                      {td.telefone && (
+                        <button
+                          type="button"
+                          className="btn-baixa"
+                          style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                          onClick={() => setWhats({ cliente: td.cliente, telefone: td.telefone, valor: td.totalVencido, vencimento: td.vencimentoMaisAntigo || undefined })}
+                          title="Cobrar no WhatsApp"
+                        >
+                          Cobrar
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
-      {/* BLOCO 2: FLUXO DE CAIXA / Recebimentos recentes */}
+      {/* SEÇÃO INFERIOR: RÉGUA DE ENVELHECIMENTO DA CARTEIRA (AGING COMPACTO E ESTRATÉGICO) */}
       <div
         className="card"
         style={{
-          padding: "20px 24px",
-          marginBottom: 24,
-          display: "flex",
-          flexDirection: "column",
-          gap: 0,
-          background: "var(--card, #ffffff)",
+          padding: "20px 22px",
+          background: "var(--card)",
           borderRadius: 14,
           border: "1px solid var(--line)",
-          boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
+          boxShadow: "var(--shadow-xs)",
+          marginBottom: 28,
         }}
       >
-        {/* Cabeçalho */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
           <div>
             <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
-              FLUXO DE CAIXA
+              ESTRATIFICAÇÃO DE RISCO
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>
-              Recebimentos recentes
-            </div>
-          </div>
-          <button
-            type="button"
-            className="btn ghost"
-            onClick={() => carregarRecebimentosRecentes()}
-            style={{ padding: "4px 8px", fontSize: 16, color: "var(--mut)", borderRadius: 6, lineHeight: 1 }}
-            title="Atualizar recebimentos recentes"
-          >
-            ⋯
-          </button>
-        </div>
-
-        {/* Lista de Recebimentos */}
-        {loadingRecebimentos && recebimentos.length === 0 ? (
-          <div style={{ padding: "28px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
-            Carregando recebimentos recentes…
-          </div>
-        ) : recebimentos.length === 0 ? (
-          <div style={{ padding: "28px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
-            Nenhum recebimento registrado recentemente.
-          </div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            {recebimentos.slice(0, 5).map((rec, idx, arr) => (
-              <div
-                key={rec.id}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  padding: "13px 0",
-                  borderBottom: idx === arr.length - 1 ? "none" : "1px solid #f1f5f9",
-                  transition: "background-color 0.15s ease",
-                }}
-              >
-                {/* Lado Esquerdo: Avatar + Nome + Descrição */}
-                <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
-                  <div
-                    style={{
-                      width: 40,
-                      height: 40,
-                      borderRadius: "50%",
-                      backgroundColor: rec.corAvatar,
-                      color: "#ffffff",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      letterSpacing: "0.02em",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {rec.iniciais}
-                  </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        fontSize: 14,
-                        color: "var(--ink)",
-                        whiteSpace: "nowrap",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        cursor: "pointer",
-                      }}
-                      title={rec.clienteNome}
-                      onClick={() => setFichaCliente({ cliente: rec.clienteNome, telefone: rec.telefone })}
-                    >
-                      {rec.clienteNome}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 2 }}>
-                      {rec.descricao}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Lado Direito: Valor + Tempo Relativo */}
-                <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)" }}>
-                    {money(rec.valor)}
-                  </div>
-                  <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
-                    {rec.tempoRelativo}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Rodapé */}
-        <div style={{ paddingTop: 14, marginTop: 4, borderTop: recebimentos.length > 0 ? "1px solid #f1f5f9" : "none" }}>
-          <button
-            type="button"
-            onClick={() => setModalTodosRecebimentos(true)}
-            style={{
-              background: "none",
-              border: "none",
-              padding: 0,
-              color: "var(--ink)",
-              fontWeight: 700,
-              fontSize: 13,
-              display: "inline-flex",
-              alignItems: "center",
-              gap: 6,
-              cursor: "pointer",
-            }}
-          >
-            Ver todos os recebimentos ↗
-          </button>
-        </div>
-      </div>
-
-      {/* BLOCO 3: Aging de Inadimplência (As 7 Faixas Estratégicas de Cobrança) */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-          <div>
-            <h2 style={{ fontSize: 17, margin: 0 }}>Régua de Envelhecimento & Risco (Aging da Dívida)</h2>
-            <div className="sub" style={{ fontSize: 12.5 }}>
-              Estratificação de atrasos para aplicação das réguas de negociação recomendadas.
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+              Régua de Envelhecimento da Inadimplência (Aging)
             </div>
           </div>
           {onNavegarAba && (
@@ -1821,183 +1646,43 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               type="button"
               className="btn ghost"
               onClick={() => onNavegarAba("renegociacao")}
-              style={{ fontSize: 12, padding: "5px 10px" }}
+              style={{ fontSize: 12, padding: "5px 12px" }}
             >
               Abrir Central de Renegociação →
             </button>
           )}
         </div>
 
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-            gap: 12,
-          }}
-        >
-          {faixasAging.map(f => (
+        {/* Mini cards compactos das faixas de atraso */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+          {faixasAging.filter(f => f.id !== "hoje").map(f => (
             <div
               key={f.id}
-              className="card"
               style={{
-                borderLeft: `5px solid ${f.cor}`,
+                background: "var(--soft)",
+                borderRadius: 10,
+                border: "1px solid var(--line)",
+                borderLeft: `4px solid ${f.cor}`,
+                padding: "10px 12px",
                 display: "flex",
                 flexDirection: "column",
-                justifyContent: "space-between",
-                padding: 14,
-                gap: 10,
-                position: "relative",
+                gap: 2,
               }}
             >
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4 }}>
-                  <span style={{ fontWeight: 700, fontSize: 14, color: f.cor }}>{f.titulo}</span>
-                  <span
-                    style={{
-                      fontSize: 11,
-                      fontWeight: 700,
-                      padding: "1px 6px",
-                      borderRadius: 99,
-                      background: f.bgCor,
-                      color: f.cor,
-                    }}
-                  >
-                    {f.qtd} {f.qtd === 1 ? "título" : "títulos"}
-                  </span>
-                </div>
-                <div style={{ fontSize: 11.5, color: "var(--mut)", marginBottom: 8 }}>{f.subtitulo}</div>
-
-                <div style={{ fontSize: 20, fontWeight: 700, color: "var(--ink)" }}>{money(f.valor)}</div>
-
-                {f.porcentagemDoVencido > 0 && (
-                  <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
-                    Representa <b>{f.porcentagemDoVencido.toFixed(1)}%</b> do total vencido
-                  </div>
-                )}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: f.cor }}>{f.diasLabel}</span>
+                <span style={{ fontSize: 10.5, color: "var(--mut)", fontWeight: 600 }}>{f.qtd} tit.</span>
               </div>
-
-              <div
-                style={{
-                  borderTop: "1px solid var(--line)",
-                  paddingTop: 8,
-                  fontSize: 11.5,
-                  color: "var(--mut)",
-                  lineHeight: 1.35,
-                }}
-              >
-                <b style={{ color: "var(--ink)" }}>Ação:</b> {f.estrategiaSugerida}
+              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>
+                {money(f.valor)}
+              </div>
+              <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>
+                {f.porcentagemDoVencido > 0 ? `${f.porcentagemDoVencido.toFixed(1)}% do vencido` : "—"}
               </div>
             </div>
           ))}
         </div>
-      </div>
-
-      {/* BLOCO 4: Top 5 Maiores Inadimplentes */}
-      <div className="card" style={{ padding: 18, marginBottom: 24 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
-          <div>
-            <h3 style={{ margin: 0, fontSize: 16 }}>Top 5 Maiores Saldos Vencidos</h3>
-            <div className="sub" style={{ fontSize: 12 }}>
-              Clientes prioritários para contato direto e acordo estruturado.
-            </div>
-          </div>
-          {onNavegarAba && (
-            <button
-              type="button"
-              className="btn ghost"
-              onClick={() => onNavegarAba("promissorias", "vencidas")}
-              style={{ fontSize: 12, padding: "5px 10px" }}
-            >
-              Ver todas as vencidas →
-            </button>
-          )}
-        </div>
-
-        {topDevedores.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 20, color: "var(--mut)" }}>
-            🎉 Nenhuma promissória vencida no momento! Parabéns pelo controle de inadimplência.
-          </div>
-        ) : (
-          <div className="wrap" style={{ border: 0, boxShadow: "none" }}>
-            <table>
-              <thead>
-                <tr>
-                  <th>Cliente</th>
-                  <th>Telefone</th>
-                  <th style={{ textAlign: "center" }}>Títulos em Atraso</th>
-                  <th style={{ textAlign: "right" }}>Maior Atraso</th>
-                  <th style={{ textAlign: "right" }}>Total Vencido</th>
-                  <th style={{ textAlign: "right" }}>Ações</th>
-                </tr>
-              </thead>
-              <tbody>
-                {topDevedores.map((td, idx) => (
-                  <tr key={td.cliente}>
-                    <td>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span
-                          style={{
-                            width: 20,
-                            height: 20,
-                            borderRadius: 99,
-                            background: "var(--soft)",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontSize: 11,
-                            fontWeight: 700,
-                            color: "var(--mut)",
-                          }}
-                        >
-                          {idx + 1}
-                        </span>
-                        <button
-                          type="button"
-                          className="link-cli"
-                          onClick={() => setFichaCliente({ cliente: td.cliente, telefone: td.telefone })}
-                          title="Ver ficha completa do cliente"
-                        >
-                          {td.cliente}
-                        </button>
-                      </div>
-                    </td>
-                    <td className="mono">{td.telefone || "—"}</td>
-                    <td style={{ textAlign: "center" }}>
-                      <span className="pill p-NÃO">{td.qtdPromissorias}</span>
-                    </td>
-                    <td style={{ textAlign: "right", color: "var(--bad)", fontWeight: 600 }}>
-                      {td.maiorAtrasoDias} dias
-                    </td>
-                    <td className="n" style={{ color: "var(--bad)", fontWeight: 700, fontSize: 14 }}>
-                      {money(td.totalVencido)}
-                    </td>
-                    <td className="acts">
-                      <button
-                        className="ed"
-                        onClick={() => setFichaCliente({ cliente: td.cliente, telefone: td.telefone })}
-                      >
-                        Ficha
-                      </button>
-                      {td.telefone && normalizarTelefones(td.telefone).length > 0 && (
-                        <button
-                          className="btn-baixa"
-                          style={{ background: "#25D366" }}
-                          onClick={() => setWhats({ cliente: td.cliente, telefone: td.telefone, valor: td.totalVencido, vencimento: td.vencimentoMaisAntigo || undefined })}
-                          title="Cobrar via WhatsApp"
-                        >
-                          Cobrar
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      {/* Modais */}
+      </div>{/* Modais */}
       {fichaCliente && (
         <FichaCliente
           cliente={fichaCliente.cliente}

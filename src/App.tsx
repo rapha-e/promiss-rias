@@ -94,13 +94,30 @@ function Shell({ session }: { session: Session }) {
     <>
       <header className="noprint">
         <img src={logo} alt="LeoÓticas" className="header-logo" />
-        <div><div className="brand">LeoÓticas<i>.</i>fin</div><div className="sub">Promissórias Loja</div></div>
+        <div>
+          <div className="brand">LeoÓticas<i>.</i>fin</div>
+          <div className="sub">Gestão de Promissórias & Crediário</div>
+        </div>
         <div className="sp" />
-        <span className="role">{session.user.email} · {isAdmin ? "administrador" : "leitura"}</span>
-        <button className="btn ghost" onClick={() => supabase.auth.signOut()}>Sair</button>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "var(--soft)", padding: "5px 12px", borderRadius: 99, fontSize: 12 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: "#10b981", display: "inline-block" }} />
+            <span style={{ color: "var(--ink)", fontWeight: 600 }}>{session.user.email?.split("@")[0]}</span>
+            <span style={{ color: "var(--mut)", fontSize: 11 }}>• {isAdmin ? "administrador" : "operador"}</span>
+          </div>
+          <button className="btn ghost" style={{ padding: "5px 12px", fontSize: 12 }} onClick={() => supabase.auth.signOut()}>Sair</button>
+        </div>
       </header>
       <nav className="tabs noprint">
-        {TABS.map(([k, l]) => <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>{l}</button>)}
+        {TABS.map(([k, l]) => (
+          <button key={k} className={tab === k ? "on" : ""} onClick={() => setTab(k)}>
+            {k === "dashboard" && "📊 "}
+            {k === "promissorias" && "📋 "}
+            {k === "renegociacao" && "🤝 "}
+            {k === "promessas" && "📅 "}
+            {l}
+          </button>
+        ))}
       </nav>
       <main>
         <ErrorBoundary>
