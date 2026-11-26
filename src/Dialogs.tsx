@@ -60,7 +60,17 @@ export function VencCell({ r }: { r: Row }) {
   );
 }
 
-export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: () => void; onSaved: () => void }) {
+export function Editor({
+  row,
+  modoInicial = "parcela",
+  onClose,
+  onSaved,
+}: {
+  row: Row | null;
+  modoInicial?: "parcela" | "compra_total";
+  onClose: () => void;
+  onSaved: () => void;
+}) {
   const [n, setN] = useState((row?.cliente_nome ?? "").toUpperCase());
   const [p, setP] = useState(row ? mascaraTelefone(row.telefone) : "");
   const [t, setT] = useState(row ? formatarMascaraMoeda(row.divida_total) : "");
@@ -68,14 +78,15 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
   const [qtd, setQtd] = useState(1);
   const [i, setI] = useState(row?.parcelas ?? "1X");
   const [d, setD] = useState(row?.vencimento ?? somaDias(hoje(), 30));
+  const [obsParcela, setObsParcela] = useState("");
   const [atualizarProximas, setAtualizarProximas] = useState(true);
   const [parcelasCarne, setParcelasCarne] = useState<Row[]>([]);
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
   const [scoreCliente, setScoreCliente] = useState<CreditScoreInfo | null>(null);
 
-  // Modo de edição: "parcela" para ajustes pontuais na parcela individual, ou "compra_total" para unificar/reparcelar
-  const [modoEdicao, setModoEdicao] = useState<"parcela" | "compra_total">("parcela");
+  // Modo de edição definido diretamente pelo botão clicado ("parcela" = Editar rápido | "compra_total" = Renegociar / Troca)
+  const [modoEdicao] = useState<"parcela" | "compra_total">(modoInicial);
 
   // Estados para Unificação / Reparcelamento da Dívida Total / Troca por Menor Valor
   const [todasPromissoriasCliente, setTodasPromissoriasCliente] = useState<Row[]>([]);
@@ -820,7 +831,7 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
       const novoNome = n.trim().toUpperCase();
       const novoTel = p.trim();
 
-      const payload = {
+      const payload: Record<string, any> = {
         cliente_nome: novoNome,
         telefone: novoTel,
         divida_total: T,
@@ -828,6 +839,24 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         valor_pago: G,
         vencimento: d || null,
       };
+      if (obsParcela.trim()) {
+        let logsArray: any[] = [];
+        if (row.origem) {
+          try {
+            const parsed = JSON.parse(row.origem);
+            if (Array.isArray(parsed)) logsArray = parsed;
+          } catch (_) {}
+        }
+        const { data: userData } = await supabase.auth.getUser();
+        const operadorEmail = userData?.user?.email || "Operador";
+        logsArray.push({
+          data: new Date().toISOString(),
+          valor: 0,
+          operador: operadorEmail,
+          detalhes: `Observação da edição cadastral: ${obsParcela.trim()}`,
+        });
+        payload.origem = JSON.stringify(logsArray);
+      }
       const { error } = await supabase.from("promissorias").update(payload).eq("id", row.id);
       if (error) {
         setBusy(false);
@@ -940,8 +969,8 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
         <h2 style={{ margin: 0 }}>
           {row
             ? modoEdicao === "compra_total"
-              ? (tipoAjusteUnificacao === "troca_menor_valor" ? "Troca por Menor Valor / Reparcelamento" : "Unificar / Reparcelar Dívida Total")
-              : "Editar promissória"
+              ? (tipoAjusteUnificacao === "troca_menor_valor" ? "Troca por Menor Valor / Reparcelamento" : "Renegociar / Reparcelar Dívida")
+              : `Editar Parcela (${row.parcelas || "1X"})`
             : "Nova promissória"}
         </h2>
         <div ref={containerNomeRef} style={{ position: "relative" }}>
@@ -1187,55 +1216,6 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
             </div>
           )}
         </div>
-
-        {/* Se for edição de promissória existente, oferece abas para editar parcela pontual ou unificar dívida total */}
-        {!isNova && (
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, margin: "14px 0 16px 0" }}>
-            <button
-              type="button"
-              className={`btn ghost ${modoEdicao === "parcela" ? "on" : ""}`}
-              onClick={() => setModoEdicao("parcela")}
-              style={{
-                padding: "9px 12px",
-                fontSize: 12.5,
-                fontWeight: 700,
-                borderRadius: 8,
-                borderColor: modoEdicao === "parcela" ? "var(--brand)" : "var(--line)",
-                background: modoEdicao === "parcela" ? "var(--soft)" : "transparent",
-                color: modoEdicao === "parcela" ? "var(--brand)" : "var(--ink)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-              }}
-            >
-              <span>📝</span>
-              <span>Editar Parcela Pontual ({row.parcelas})</span>
-            </button>
-
-            <button
-              type="button"
-              className={`btn ghost ${modoEdicao === "compra_total" ? "on" : ""}`}
-              onClick={() => setModoEdicao("compra_total")}
-              style={{
-                padding: "9px 12px",
-                fontSize: 12.5,
-                fontWeight: 700,
-                borderRadius: 8,
-                borderColor: modoEdicao === "compra_total" ? "var(--brand)" : "var(--line)",
-                background: modoEdicao === "compra_total" ? "rgba(15, 118, 110, 0.12)" : "transparent",
-                color: modoEdicao === "compra_total" ? "var(--brand)" : "var(--ink)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 6,
-              }}
-            >
-              <span>🔀</span>
-              <span>Reparcelar / Unificar Dívida Total</span>
-            </button>
-          </div>
-        )}
 
         {isNova ? (
           <>
@@ -1795,6 +1775,15 @@ export function Editor({ row, onClose, onSaved }: { row: Row | null; onClose: ()
               <label>Parcelas<input value={i} onChange={e => setI(e.target.value)} maxLength={40} placeholder="ex.: 1/3" /></label>
               <label>Vencimento<input type="date" value={d} onChange={e => setD(e.target.value)} /></label>
             </div>
+            <label>
+              Observação (opcional)
+              <input
+                value={obsParcela}
+                onChange={e => setObsParcela(e.target.value)}
+                maxLength={200}
+                placeholder="ex.: Prorrogação de vencimento combinada com o cliente"
+              />
+            </label>
             <div className="prev">
               <span>Saldo <b className="mono">{ok ? money(Math.max(T - G, 0)) : "—"}</b></span>
               {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
@@ -2159,6 +2148,7 @@ export function FichaCliente({
   const [baixa, setBaixa] = useState<Row | null>(null);
   const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | undefined>(undefined);
+  const [renegociandoRow, setRenegociandoRow] = useState<Row | null>(null);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [desmembrarRow, setDesmembrarRow] = useState<Row | null>(null);
   const [whats, setWhats] = useState(false);
@@ -2566,6 +2556,17 @@ export function FichaCliente({
               </div>
             )}
           </div>
+          {isAdmin && abertos.length > 0 && (
+            <button
+              type="button"
+              className="btn ghost"
+              style={{ borderColor: "var(--brand)", color: "var(--brand)", fontWeight: 700 }}
+              onClick={() => setRenegociandoRow(compraAtiva?.proximaPromissoria || abertos[0])}
+              title="Reparcelar dívida (1x a 12x), registrar troca de produto ou unificar compras"
+            >
+              🔀 Renegociar / Troca
+            </button>
+          )}
           {abertos.length > 0 && <button className="btn" onClick={() => setWhats(true)}>Cobrar por WhatsApp</button>}
           <button className="btn ghost" onClick={onClose}>Fechar</button>
         </div>
@@ -2913,7 +2914,8 @@ export function FichaCliente({
       {baixa && <BaixaDialog row={baixa} onClose={() => setBaixa(null)} onSaved={() => { setBaixa(null); refresh(); }} />}
       {desmembrarRow && <DesmembrarDialog row={desmembrarRow} onClose={() => setDesmembrarRow(null)} onSaved={() => { setDesmembrarRow(null); refresh(); }} />}
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
-      {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
+      {editing && <Editor row={editing} modoInicial="parcela" onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
+      {renegociandoRow && <Editor row={renegociandoRow} modoInicial="compra_total" onClose={() => setRenegociandoRow(null)} onSaved={() => { setRenegociandoRow(null); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} onTelefoneAtualizado={() => refresh()} />}
       
