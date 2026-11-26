@@ -2230,6 +2230,7 @@ export function FichaCliente({
 
   const [historicoCobrancas, setHistoricoCobrancas] = useState<{ id: number; data: string; canal: string; usuario: string; msg: string }[]>([]);
   const [exibirHistoricoCobranca, setExibirHistoricoCobranca] = useState(false);
+  const [exibirHistoricoCompras, setExibirHistoricoCompras] = useState(false);
 
   const carregarHistoricoCobrancas = useCallback(async () => {
     try {
@@ -2284,8 +2285,122 @@ export function FichaCliente({
   };
   const abertos = rows.filter(r => !r.fundo_perdido && r.saldo_devedor > 0);
   const comprasCliente = useMemo(() => separarComprasCliente(rows), [rows]);
+
+  // Vendas em aberto (saldo > 0)
   const comprasAbertas = useMemo(() => comprasCliente.filter(c => c.emAberto), [comprasCliente]);
-  const comprasQuitadas = useMemo(() => comprasCliente.filter(c => !c.emAberto), [comprasCliente]);
+
+  // Vendas quitadas legítimas (exclui compras cujas parcelas foram todas baixadas por repactuação)
+  const comprasQuitadas = useMemo(() => {
+    return comprasCliente.filter(c => !c.emAberto && c.promissorias.some(p => !ehRepactuada(p)));
+  }, [comprasCliente]);
+
+  // Promissórias válidas da carteira (exclui linhas repetidas baixadas por repactuação)
+  const promissoriasValidas = useMemo(() => {
+    return rows.filter(r => !ehRepactuada(r) || (r.saldo_devedor ?? 0) > 0);
+  }, [rows]);
+
+  // Histórico consolidado de compras repactuadas, trocas de produto e cancelamentos (com log e auditoria)
+  const historicoOperacoes = useMemo(() => {
+    type OperacaoHistorico = {
+      id: string;
+      data: string;
+      titulo: string;
+      tipo: "troca" | "repactuacao" | "fundo_perdido";
+      operador: string;
+      detalhes: string;
+      saldoAnterior?: number;
+      qtdParcelasBaixadas?: number;
+      novoOculos?: number;
+      jaPagoAbatido?: number;
+      abatimento?: number;
+      entrada?: number;
+      novoSaldo?: number;
+      novasParcelasQtd?: number;
+      primeiroVencimento?: string;
+    };
+
+    const lista: OperacaoHistorico[] = [];
+    const chavesVistas = new Set<string>();
+
+    for (const r of rows) {
+      if (r.origem) {
+        try {
+          const parsed = JSON.parse(r.origem);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              const ehAcordo = item.acordo || (item.detalhes && (
+                item.detalhes.includes("Troca por") ||
+                item.detalhes.includes("repactua") ||
+                item.detalhes.includes("Unificação") ||
+                item.detalhes.includes("REPACTUACAO")
+              ));
+              if (ehAcordo) {
+                const tipoStr = String(item.acordo?.tipo || "");
+                const ehTroca = tipoStr.includes("TROCA") || (item.detalhes && item.detalhes.toLowerCase().includes("troca"));
+                const dataChave = item.data ? item.data.slice(0, 16) : (r.created_at || String(r.id));
+                const chave = `${dataChave}_${ehTroca ? "troca" : "repact"}`;
+                if (!chavesVistas.has(chave)) {
+                  chavesVistas.add(chave);
+                  lista.push({
+                    id: `log_${chave}`,
+                    data: item.data || r.created_at || "",
+                    titulo: ehTroca ? "Troca por Produto / Repactuação" : "Acordo de Repactuação & Unificação",
+                    tipo: ehTroca ? "troca" : "repactuacao",
+                    operador: item.operador || "Operador do Sistema",
+                    detalhes: item.detalhes || "Operação de novação/reparcelamento registrada.",
+                    saldoAnterior: item.acordo?.saldoTotalAnterior ?? item.saldoRepactuado,
+                    qtdParcelasBaixadas: item.acordo?.titulosEnvolvidos?.length ?? undefined,
+                    novoOculos: item.acordo?.novoOculos,
+                    jaPagoAbatido: item.acordo?.jaPagoAbatido,
+                    abatimento: item.acordo?.abatimento,
+                    entrada: item.acordo?.entrada,
+                    novoSaldo: item.acordo?.novoSaldo,
+                    novasParcelasQtd: item.acordo?.parcelasQtd,
+                    primeiroVencimento: item.acordo?.primeiroVencimento,
+                  });
+                }
+              }
+            }
+          }
+        } catch {
+          if (ehRepactuada(r)) {
+            const ehTroca = r.origem.toLowerCase().includes("troca");
+            const chave = `legado_${r.id}_${ehTroca ? "troca" : "repact"}`;
+            if (!chavesVistas.has(chave)) {
+              chavesVistas.add(chave);
+              lista.push({
+                id: chave,
+                data: r.created_at || "",
+                titulo: ehTroca ? "Troca de Produto (Legado)" : "Repactuação de Dívida (Legado)",
+                tipo: ehTroca ? "troca" : "repactuacao",
+                operador: "Operador",
+                detalhes: r.origem,
+                saldoAnterior: r.divida_total,
+              });
+            }
+          }
+        }
+      }
+
+      if (r.fundo_perdido) {
+        const chaveFp = `fp_${r.id}`;
+        if (!chavesVistas.has(chaveFp)) {
+          chavesVistas.add(chaveFp);
+          lista.push({
+            id: chaveFp,
+            data: r.fundo_perdido_em || r.vencimento || "",
+            titulo: `Cancelamento / Fundo Perdido (${r.parcelas || "Parcela"})`,
+            tipo: "fundo_perdido",
+            operador: "Operador",
+            detalhes: r.fundo_perdido_motivo || "Promissória marcada como fundo perdido / cancelada.",
+            saldoAnterior: r.divida_total,
+          });
+        }
+      }
+    }
+
+    return lista.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
+  }, [rows]);
 
   const [filtroAba, setFiltroAba] = useState<"compra_ativa" | "quitadas" | "todas">("compra_ativa");
   const [compraIdSelecionada, setCompraIdSelecionada] = useState<string>("");
@@ -2313,20 +2428,16 @@ export function FichaCliente({
     return promissoriasOutras.filter(r => !r.fundo_perdido && !ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
   }, [promissoriasOutras]);
 
-  const totalOutrasRepactuadas = useMemo(() => {
-    return promissoriasOutras.filter(r => !r.fundo_perdido && ehRepactuada(r) && (r.saldo_devedor ?? 0) <= 0).reduce((s, r) => s + (r.divida_total ?? 0), 0);
-  }, [promissoriasOutras]);
-
   const rowsFiltradas = useMemo(() => {
     if (filtroAba === "compra_ativa" && compraAtiva) {
-      return compraAtiva.promissorias;
+      return compraAtiva.promissorias.filter(p => !ehRepactuada(p) || (p.saldo_devedor ?? 0) > 0);
     }
     if (filtroAba === "quitadas") {
-      const qRows = comprasQuitadas.flatMap(c => c.promissorias);
-      return qRows.length > 0 ? qRows : promissoriasOutras;
+      const qRows = comprasQuitadas.flatMap(c => c.promissorias).filter(p => !ehRepactuada(p));
+      return qRows.length > 0 ? qRows : promissoriasOutras.filter(p => !ehRepactuada(p) && (p.saldo_devedor ?? 0) <= 0);
     }
-    return rows;
-  }, [filtroAba, compraAtiva, comprasQuitadas, promissoriasOutras, rows]);
+    return promissoriasValidas;
+  }, [filtroAba, compraAtiva, comprasQuitadas, promissoriasOutras, promissoriasValidas]);
 
   const [sortCol, setSortCol] = useState<string>("vencimento");
   const [sortAsc, setSortAsc] = useState<boolean>(false);
@@ -2522,10 +2633,6 @@ export function FichaCliente({
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
                 ✓ {money(totalOutrasQuitadas)} quitados em compras anteriores
               </span>
-            ) : totalOutrasRepactuadas > 0 ? (
-              <span className="ksub" style={{ color: "#7e22ce", fontWeight: 600 }}>
-                🔄 {money(totalOutrasRepactuadas)} repactuados de compras anteriores
-              </span>
             ) : (compraAtiva?.parcelasPagas ?? 0) > 0 ? (
               <span className="ksub" style={{ color: "var(--brand)", fontWeight: 600 }}>
                 ✓ {compraAtiva?.parcelasPagas} pagas · {compraAtiva?.parcelasAbertas} em aberto
@@ -2591,42 +2698,28 @@ export function FichaCliente({
             </button>
           )}
 
-          {comprasQuitadas.length > 0 && (() => {
-            const todasRepactuadas = comprasQuitadas.every(c => c.promissorias.every(ehRepactuada));
-            const temRepactuada = comprasQuitadas.some(c => c.promissorias.some(ehRepactuada));
-            const totalQtd = comprasQuitadas.reduce((s, c) => s + c.promissorias.length, 0);
-            return (
-              <button
-                type="button"
-                onClick={() => setFiltroAba("quitadas")}
-                style={{
-                  padding: "6px 14px",
-                  borderRadius: 99,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  border: filtroAba === "quitadas"
-                    ? (todasRepactuadas ? "1.5px solid #a855f7" : "1.5px solid var(--brand)")
-                    : "1px solid var(--line)",
-                  background: filtroAba === "quitadas"
-                    ? (todasRepactuadas ? "#7e22ce" : "var(--brand)")
-                    : "var(--panel)",
-                  color: filtroAba === "quitadas" ? "#fff" : (todasRepactuadas ? "#7e22ce" : "var(--ink)"),
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: 6,
-                  transition: "all 0.15s ease",
-                }}
-              >
-                <span>{todasRepactuadas ? "🔄" : "✓"}</span>{" "}
-                {todasRepactuadas
-                  ? `Vendas Repactuadas (${totalQtd})`
-                  : temRepactuada
-                  ? `Quitadas / Repactuadas (${totalQtd})`
-                  : `Vendas Já Quitadas (${totalQtd})`}
-              </button>
-            );
-          })()}
+          {comprasQuitadas.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setFiltroAba("quitadas")}
+              style={{
+                padding: "6px 14px",
+                borderRadius: 99,
+                fontSize: 12,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: filtroAba === "quitadas" ? "1.5px solid var(--brand)" : "1px solid var(--line)",
+                background: filtroAba === "quitadas" ? "var(--brand)" : "var(--panel)",
+                color: filtroAba === "quitadas" ? "#fff" : "var(--ink)",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                transition: "all 0.15s ease",
+              }}
+            >
+              <span>✓</span> Vendas Já Quitadas ({comprasQuitadas.reduce((s, c) => s + c.promissorias.filter(p => !ehRepactuada(p)).length, 0)})
+            </button>
+          )}
 
           <button
             type="button"
@@ -2646,7 +2739,30 @@ export function FichaCliente({
               transition: "all 0.15s ease",
             }}
           >
-            Todas as Promissórias ({rows.length})
+            Todas as Promissórias ({promissoriasValidas.length})
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setExibirHistoricoCompras(true)}
+            style={{
+              padding: "6px 14px",
+              borderRadius: 99,
+              fontSize: 12,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: "1px solid #c084fc",
+              background: "rgba(168, 85, 247, 0.08)",
+              color: "#7e22ce",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              marginLeft: "auto",
+              transition: "all 0.15s ease",
+            }}
+            title="Visualizar histórico consolidado de compras repactuadas, trocas de produtos e cancelamentos com auditoria completa"
+          >
+            <span>📜</span> Histórico de Compras {historicoOperacoes.length > 0 ? `(${historicoOperacoes.length})` : ""}
           </button>
         </div>
         <div className="wrap">
@@ -2801,6 +2917,181 @@ export function FichaCliente({
       {editing && <Editor row={editing} onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && <WhatsDialog nome={cliente} telefone={tel} mensagem={mensagemCobranca(cliente, abertos.map(r => ({ valor: r.saldo_devedor, vencimento: r.vencimento })))} onClose={() => setWhats(false)} onTelefoneAtualizado={() => refresh()} />}
+      
+      {/* MODAL: Histórico de Compras, Repactuações & Cancelamentos */}
+      {exibirHistoricoCompras && (
+        <div className="modal-backdrop" onClick={() => setExibirHistoricoCompras(false)}>
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 720, width: "100%", maxHeight: "88vh", display: "flex", flexDirection: "column", padding: 22 }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", paddingBottom: 14, borderBottom: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#7e22ce", textTransform: "uppercase" }}>
+                  HISTÓRICO & AUDITORIA DE COMPRAS
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "var(--ink)", marginTop: 2 }}>
+                  Compras Repactuadas, Canceladas & Trocas
+                </div>
+                <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 2 }}>
+                  Cliente: <b style={{ color: "var(--ink)" }}>{cliente}</b>
+                </div>
+              </div>
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={() => setExibirHistoricoCompras(false)}
+                style={{ padding: "4px 10px", fontSize: 16, lineHeight: 1 }}
+              >
+                ✕
+              </button>
+            </div>
+
+            <div style={{ overflowY: "auto", padding: "16px 0", display: "flex", flexDirection: "column", gap: 14 }}>
+              {historicoOperacoes.length === 0 ? (
+                <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--mut)", fontSize: 13 }}>
+                  <span style={{ fontSize: 24, display: "block", marginBottom: 8 }}>📜</span>
+                  <b>Nenhuma compra repactuada ou cancelada registrada.</b>
+                  <div style={{ fontSize: 12, marginTop: 4 }}>
+                    Todas as compras e promissórias deste cliente estão ativas ou foram quitadas regularmente.
+                  </div>
+                </div>
+              ) : (
+                historicoOperacoes.map(op => {
+                  const corTema = op.tipo === "troca" ? "#0284c7" : op.tipo === "fundo_perdido" ? "#dc2626" : "#7e22ce";
+                  const icone = op.tipo === "troca" ? "👓" : op.tipo === "fundo_perdido" ? "⛔" : "🔀";
+                  return (
+                    <div
+                      key={op.id}
+                      style={{
+                        background: "var(--card)",
+                        border: "1px solid var(--line)",
+                        borderLeft: `4px solid ${corTema}`,
+                        borderRadius: 10,
+                        padding: "14px 16px",
+                        boxShadow: "var(--shadow-xs)",
+                      }}
+                    >
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 20 }}>{icone}</span>
+                          <div>
+                            <div style={{ fontWeight: 800, fontSize: 14, color: "var(--ink)" }}>{op.titulo}</div>
+                            <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
+                              {op.data ? `Operação em ${dt(op.data.slice(0, 10))} ${op.data.length > 10 ? op.data.slice(11, 16) : ""}` : "Data não registrada"}
+                              {op.operador && <> · Operador: <b>{op.operador}</b></>}
+                            </div>
+                          </div>
+                        </div>
+                        <span
+                          style={{
+                            fontSize: 11,
+                            fontWeight: 700,
+                            padding: "3px 9px",
+                            borderRadius: 99,
+                            background: `${corTema}15`,
+                            color: corTema,
+                          }}
+                        >
+                          {op.tipo === "troca" ? "Troca Realizada" : op.tipo === "fundo_perdido" ? "Cancelamento / Fundo Perdido" : "Repactuado"}
+                        </span>
+                      </div>
+
+                      {/* Métricas e valores consolidados da operação */}
+                      {(op.saldoAnterior != null || op.novoSaldo != null || op.novoOculos != null) && (
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))",
+                            gap: 8,
+                            margin: "10px 0",
+                            background: "var(--soft)",
+                            padding: "10px 12px",
+                            borderRadius: 8,
+                            border: "1px solid var(--line)",
+                          }}
+                        >
+                          {op.saldoAnterior != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Saldo Anterior</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{money(op.saldoAnterior)}</div>
+                            </div>
+                          )}
+                          {op.qtdParcelasBaixadas != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Títulos Baixados</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)" }}>{op.qtdParcelasBaixadas} parcelas</div>
+                            </div>
+                          )}
+                          {op.novoOculos != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Novo Produto</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#0284c7" }}>{money(op.novoOculos)}</div>
+                            </div>
+                          )}
+                          {op.jaPagoAbatido != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Já Pago Abatido</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>- {money(op.jaPagoAbatido)}</div>
+                            </div>
+                          )}
+                          {op.abatimento != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Desconto / Abatimento</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>- {money(op.abatimento)}</div>
+                            </div>
+                          )}
+                          {op.entrada != null && op.entrada > 0 && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Entrada no Ato</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#059669" }}>{money(op.entrada)}</div>
+                            </div>
+                          )}
+                          {op.novoSaldo != null && (
+                            <div>
+                              <div style={{ fontSize: 10.5, color: "var(--mut)", textTransform: "uppercase" }}>Novo Saldo Gerado</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--brand)" }}>
+                                {money(op.novoSaldo)} {op.novasParcelasQtd ? `(${op.novasParcelasQtd}x)` : ""}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Log com detalhes da operação */}
+                      <div style={{ marginTop: 6 }}>
+                        <div style={{ fontSize: 10.5, fontWeight: 700, color: "var(--mut)", textTransform: "uppercase", marginBottom: 3 }}>
+                          Log Executado na Operação:
+                        </div>
+                        <div
+                          style={{
+                            fontSize: 12,
+                            color: "var(--ink)",
+                            background: "rgba(0,0,0,0.025)",
+                            padding: "8px 10px",
+                            borderRadius: 6,
+                            lineHeight: 1.45,
+                            border: "1px solid var(--line)",
+                          }}
+                        >
+                          {op.detalhes}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div style={{ paddingTop: 12, borderTop: "1px solid var(--line)", display: "flex", justifyContent: "flex-end" }}>
+              <button type="button" className="btn" onClick={() => setExibirHistoricoCompras(false)}>
+                Fechar Histórico
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </Painel>
   );
 }
