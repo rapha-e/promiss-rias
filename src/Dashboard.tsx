@@ -937,10 +937,10 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   return (
     <div style={{ maxWidth: 1360, margin: "0 auto", paddingBottom: 40 }}>
       {/* Cabeçalho da Página - Visão Executiva Limpa */}
-      <div className="head2 noprint" style={{ alignItems: "center", marginBottom: 20 }}>
+      <div className="head2 noprint" style={{ alignItems: "center", marginBottom: 16 }}>
         <div>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <h1 style={{ margin: 0, fontSize: 24, fontWeight: 800, letterSpacing: "-0.03em", color: "var(--ink)" }}>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 700, letterSpacing: "-0.025em", color: "var(--ink)" }}>
               Visão Geral Operacional
             </h1>
             <span
@@ -950,9 +950,9 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                 gap: 5,
                 background: "rgba(16, 185, 129, 0.1)",
                 color: "#059669",
-                fontSize: 11.5,
+                fontSize: 11,
                 fontWeight: 700,
-                padding: "3px 9px",
+                padding: "2px 8px",
                 borderRadius: 99,
                 letterSpacing: "0.01em",
               }}
@@ -961,7 +961,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               Tempo Real
             </span>
           </div>
-          <div className="sub" style={{ marginTop: 4, fontSize: 13, color: "var(--mut)" }}>
+          <div className="sub" style={{ marginTop: 3, fontSize: 12, color: "var(--mut)" }}>
             Controle financeiro do crediário, entradas do dia e radar de cobrança prioritária.
           </div>
         </div>
@@ -1156,7 +1156,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           <div
             className="card"
             style={{
-              padding: "20px 22px",
+              padding: "16px 18px",
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--line)",
@@ -1164,12 +1164,12 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             }}
           >
             {/* Topo do Card */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
                   FLUXO DE CAIXA
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 2, letterSpacing: "-0.02em" }}>
                   Recebimentos recentes
                 </div>
               </div>
@@ -1177,7 +1177,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                 type="button"
                 className="btn ghost"
                 onClick={() => carregarRecebimentosRecentes()}
-                style={{ padding: "4px 8px", fontSize: 16, color: "var(--mut)", borderRadius: 6, lineHeight: 1 }}
+                style={{ padding: "2px 6px", fontSize: 14, color: "var(--mut)", borderRadius: 6, lineHeight: 1 }}
                 title="Atualizar recebimentos"
               >
                 ⋯
@@ -1186,11 +1186,11 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
 
             {/* Lista dos 5 últimos recebimentos */}
             {loadingRecebimentos && recebimentos.length === 0 ? (
-              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+              <div style={{ padding: "20px 0", textAlign: "center", color: "var(--mut)", fontSize: 12 }}>
                 Carregando recebimentos…
               </div>
             ) : recebimentos.length === 0 ? (
-              <div style={{ padding: "24px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+              <div style={{ padding: "20px 0", textAlign: "center", color: "var(--mut)", fontSize: 12 }}>
                 Nenhum recebimento registrado recentemente.
               </div>
             ) : (
@@ -1202,15 +1202,15 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "11px 0",
+                      padding: "9px 0",
                       borderBottom: idx === arr.length - 1 ? "none" : "1px solid var(--line)",
                     }}
                   >
-                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
                       <div
                         style={{
-                          width: 38,
-                          height: 38,
+                          width: 32,
+                          height: 32,
                           borderRadius: "50%",
                           backgroundColor: rec.corAvatar,
                           color: "#ffffff",
@@ -1218,7 +1218,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                           alignItems: "center",
                           justifyContent: "center",
                           fontWeight: 700,
-                          fontSize: 12.5,
+                          fontSize: 11,
                           letterSpacing: "0.02em",
                           flexShrink: 0,
                         }}
@@ -1228,8 +1228,8 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       <div style={{ minWidth: 0 }}>
                         <div
                           style={{
-                            fontWeight: 700,
-                            fontSize: 13.5,
+                            fontWeight: 600,
+                            fontSize: 12.5,
                             color: "var(--ink)",
                             whiteSpace: "nowrap",
                             overflow: "hidden",
@@ -1241,17 +1241,17 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                         >
                           {rec.clienteNome}
                         </div>
-                        <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
+                        <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
                           {rec.descricao}
                         </div>
                       </div>
                     </div>
 
-                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
-                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 10 }}>
+                      <div style={{ fontWeight: 600, fontSize: 13, color: "var(--ink)" }}>
                         {money(rec.valor)}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 2 }}>
+                      <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 1 }}>
                         {rec.tempoRelativo}
                       </div>
                     </div>
@@ -1260,7 +1260,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               </div>
             )}
 
-            <div style={{ paddingTop: 12, marginTop: 4, borderTop: recebimentos.length > 0 ? "1px solid var(--line)" : "none" }}>
+            <div style={{ paddingTop: 10, marginTop: 2, borderTop: recebimentos.length > 0 ? "1px solid var(--line)" : "none" }}>
               <button
                 type="button"
                 onClick={() => setModalTodosRecebimentos(true)}
@@ -1270,10 +1270,10 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                   padding: 0,
                   color: "var(--ink)",
                   fontWeight: 700,
-                  fontSize: 12.5,
+                  fontSize: 11.5,
                   display: "inline-flex",
                   alignItems: "center",
-                  gap: 5,
+                  gap: 4,
                   cursor: "pointer",
                 }}
               >
@@ -1286,29 +1286,29 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           <div
             className="card"
             style={{
-              padding: "20px 22px",
+              padding: "16px 18px",
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--line)",
               boxShadow: "var(--shadow-xs)",
               display: "flex",
               flexDirection: "column",
-              gap: 14,
+              gap: 12,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
                   META MENSAL DE CRÉDITO • {metaInfo.nomeMes}
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 2, letterSpacing: "-0.02em" }}>
                   {modoMeta === "inadimplentes" ? "Recuperação de Inadimplência" : "Arrecadação Global"}
                 </div>
               </div>
               <button
                 type="button"
                 className="btn ghost"
-                style={{ fontSize: 11.5, padding: "4px 10px", borderRadius: 8 }}
+                style={{ fontSize: 11, padding: "3px 8px", borderRadius: 6 }}
                 onClick={() => {
                   if (editandoMeta) {
                     const val = desmascararMoeda(novaMetaStr);
@@ -1333,16 +1333,16 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             </div>
 
             {/* Seletor de modo simplificado */}
-            <div style={{ display: "flex", background: "var(--soft)", padding: 3, borderRadius: 8, gap: 4, width: "fit-content" }}>
+            <div style={{ display: "flex", background: "var(--soft)", padding: 2, borderRadius: 6, gap: 3, width: "fit-content" }}>
               <button
                 type="button"
                 onClick={() => { setModoMeta("inadimplentes"); try { localStorage.setItem(MODO_META_KEY, "inadimplentes"); } catch {} }}
                 style={{
                   border: 0,
                   cursor: "pointer",
-                  fontSize: 11.5,
-                  padding: "4px 10px",
-                  borderRadius: 6,
+                  fontSize: 11,
+                  padding: "3px 8px",
+                  borderRadius: 5,
                   fontWeight: modoMeta === "inadimplentes" ? 700 : 500,
                   background: modoMeta === "inadimplentes" ? "var(--card)" : "transparent",
                   color: modoMeta === "inadimplentes" ? "var(--brand)" : "var(--mut)",
@@ -1357,9 +1357,9 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                 style={{
                   border: 0,
                   cursor: "pointer",
-                  fontSize: 11.5,
-                  padding: "4px 10px",
-                  borderRadius: 6,
+                  fontSize: 11,
+                  padding: "3px 8px",
+                  borderRadius: 5,
                   fontWeight: modoMeta === "global" ? 700 : 500,
                   background: modoMeta === "global" ? "var(--card)" : "transparent",
                   color: modoMeta === "global" ? "var(--brand)" : "var(--mut)",
@@ -1372,16 +1372,16 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
 
             {/* Progresso visual */}
             <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 6 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
                 <div>
-                  <span style={{ fontSize: 22, fontWeight: 800, color: "var(--ink)" }}>{money(metaInfo.valorAtivo)}</span>
-                  <span style={{ fontSize: 12, color: "var(--mut)", marginLeft: 6 }}>de {money(metaInfo.metaAtiva)}</span>
+                  <span style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)" }}>{money(metaInfo.valorAtivo)}</span>
+                  <span style={{ fontSize: 11, color: "var(--mut)", marginLeft: 6 }}>de {money(metaInfo.metaAtiva)}</span>
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: metaInfo.pct >= 100 ? "#10b981" : "#0f766e" }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: metaInfo.pct >= 100 ? "#10b981" : "#0f766e" }}>
                   {metaInfo.pct.toFixed(1)}% atingido
                 </span>
               </div>
-              <div style={{ height: 8, width: "100%", background: "var(--line)", borderRadius: 99, overflow: "hidden" }}>
+              <div style={{ height: 6, width: "100%", background: "var(--line)", borderRadius: 99, overflow: "hidden" }}>
                 <div
                   style={{
                     height: "100%",
@@ -1395,20 +1395,20 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             </div>
 
             {/* Métricas-chave em linha */}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10, paddingTop: 10, borderTop: "1px solid var(--line)" }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, paddingTop: 8, borderTop: "1px solid var(--line)" }}>
               <div>
-                <div style={{ fontSize: 11, color: "var(--mut)" }}>Média diária</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>{money(metaInfo.mediaDiaria)}/dia</div>
+                <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Média diária</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--ink)", marginTop: 1 }}>{money(metaInfo.mediaDiaria)}/dia</div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: "var(--mut)" }}>Projeção no mês</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: metaInfo.projecaoFechamento >= metaInfo.metaAtiva ? "#059669" : "var(--ink)", marginTop: 2 }}>
+                <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Projeção no mês</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: metaInfo.projecaoFechamento >= metaInfo.metaAtiva ? "#059669" : "var(--ink)", marginTop: 1 }}>
                   {money(metaInfo.projecaoFechamento)}
                 </div>
               </div>
               <div>
-                <div style={{ fontSize: 11, color: "var(--mut)" }}>Taxa de resgate</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#059669", marginTop: 2 }}>
+                <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Taxa de resgate</div>
+                <div style={{ fontSize: 12.5, fontWeight: 700, color: "#059669", marginTop: 1 }}>
                   {metaInfo.taxaResgate.toFixed(1)}% do vencido
                 </div>
               </div>
@@ -1417,13 +1417,13 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         </div>
 
         {/* COLUNA DIREITA: Ações Operacionais & Radar de Cobrança */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
           
           {/* Card: Promessas para Hoje (Ação Rápida) */}
           <div
             className="card"
             style={{
-              padding: "20px 22px",
+              padding: "16px 18px",
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--line)",
@@ -1431,15 +1431,15 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               boxShadow: "var(--shadow-xs)",
               display: "flex",
               flexDirection: "column",
-              gap: 12,
+              gap: 10,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#d97706", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "#d97706", textTransform: "uppercase" }}>
                   AÇÃO IMEDIATA
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 2, letterSpacing: "-0.02em" }}>
                   Promessas de Hoje ({promessasHoje.length})
                 </div>
               </div>
@@ -1448,7 +1448,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                   type="button"
                   className="link-cli"
                   onClick={() => onNavegarAba("promessas")}
-                  style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
+                  style={{ fontSize: 11.5, color: "var(--brand)", fontWeight: 700 }}
                 >
                   Central →
                 </button>
@@ -1456,14 +1456,14 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             </div>
 
             {promessasHoje.length === 0 ? (
-              <div style={{ padding: "18px 0", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+              <div style={{ padding: "14px 0", textAlign: "center", color: "var(--mut)", fontSize: 12 }}>
                 ✨ Nenhuma promessa agendada para hoje.
-                <div style={{ marginTop: 4, fontSize: 11.5 }}>
+                <div style={{ marginTop: 2, fontSize: 11 }}>
                   {promessasPosteriores.length} compromissos agendados nos próximos dias.
                 </div>
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {promessasHoje.slice(0, 5).map(p => (
                   <div
                     key={p.id}
@@ -1471,27 +1471,27 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "9px 12px",
+                      padding: "8px 10px",
                       background: "var(--soft)",
-                      borderRadius: 10,
+                      borderRadius: 8,
                       border: "1px solid var(--line)",
                     }}
                   >
                     <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
-                      <div style={{ fontWeight: 700, fontSize: 13, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ fontWeight: 600, fontSize: 12.5, color: "var(--ink)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {p.cliente}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
+                      <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 1 }}>
                         {p.telefone ? mascaraTelefone(p.telefone) : "Sem telefone"} {p.observacao ? `· ${p.observacao}` : ""}
                       </div>
                     </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      <span style={{ fontWeight: 700, color: "#0284c7", fontSize: 13.5 }}>{money(p.valor)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                      <span style={{ fontWeight: 600, color: "#0284c7", fontSize: 12.5 }}>{money(p.valor)}</span>
                       {p.telefone && (
                         <button
                           type="button"
                           className="btn-baixa"
-                          style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                          style={{ padding: "2px 7px", fontSize: 11, background: "#25D366" }}
                           onClick={() => setWhats({ cliente: p.cliente, telefone: p.telefone, valor: p.valor })}
                           title="Cobrar no WhatsApp"
                         >
@@ -1501,7 +1501,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       <button
                         type="button"
                         className="btn ghost"
-                        style={{ padding: "3px 8px", fontSize: 11 }}
+                        style={{ padding: "2px 7px", fontSize: 11 }}
                         onClick={() => handleCumprirPromessaDashboard(p.id)}
                         title="Marcar como cumprida"
                       >
@@ -1518,22 +1518,22 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           <div
             className="card"
             style={{
-              padding: "20px 22px",
+              padding: "16px 18px",
               background: "var(--card)",
               borderRadius: 14,
               border: "1px solid var(--line)",
               boxShadow: "var(--shadow-xs)",
               display: "flex",
               flexDirection: "column",
-              gap: 12,
+              gap: 10,
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--bad)", textTransform: "uppercase" }}>
+                <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "var(--bad)", textTransform: "uppercase" }}>
                   PRIORIDADE DE RECUPERAÇÃO
                 </div>
-                <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+                <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 2, letterSpacing: "-0.02em" }}>
                   Top Devedores Vencidos
                 </div>
               </div>
@@ -1542,7 +1542,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                   type="button"
                   className="link-cli"
                   onClick={() => onNavegarAba("promissorias", "vencidas")}
-                  style={{ fontSize: 12, color: "var(--brand)", fontWeight: 700 }}
+                  style={{ fontSize: 11.5, color: "var(--brand)", fontWeight: 700 }}
                 >
                   Ver todos →
                 </button>
@@ -1550,11 +1550,11 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
             </div>
 
             {topDevedores.length === 0 ? (
-              <div style={{ padding: "18px 0", textAlign: "center", color: "var(--mut)", fontSize: 12.5 }}>
+              <div style={{ padding: "14px 0", textAlign: "center", color: "var(--mut)", fontSize: 12 }}>
                 🎉 Nenhuma promissória vencida no momento!
               </div>
             ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {topDevedores.slice(0, 5).map(td => (
                   <div
                     key={td.cliente}
@@ -1562,17 +1562,17 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      padding: "8px 10px",
+                      padding: "7px 10px",
                       background: "var(--soft)",
-                      borderRadius: 10,
+                      borderRadius: 8,
                       border: "1px solid var(--line)",
                     }}
                   >
                     <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
                       <div
                         style={{
-                          fontWeight: 700,
-                          fontSize: 13,
+                          fontWeight: 600,
+                          fontSize: 12.5,
                           color: "var(--ink)",
                           overflow: "hidden",
                           textOverflow: "ellipsis",
@@ -1584,18 +1584,18 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                       >
                         {td.cliente}
                       </div>
-                      <div style={{ fontSize: 11, color: "var(--bad)", marginTop: 1, display: "flex", alignItems: "center", gap: 5 }}>
-                        <span>⚠️ {td.maiorAtrasoDias} dias de atraso</span>
+                      <div style={{ fontSize: 10.5, color: "var(--bad)", marginTop: 1, display: "flex", alignItems: "center", gap: 4 }}>
+                        <span>⚠️ {td.maiorAtrasoDias}d atraso</span>
                         <span>• {td.qtdPromissorias} {td.qtdPromissorias === 1 ? "título" : "títulos"}</span>
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-                      <span style={{ fontWeight: 700, color: "var(--bad)", fontSize: 13.5 }}>{money(td.totalVencido)}</span>
+                    <div style={{ display: "flex", alignItems: "center", gap: 5, flexShrink: 0 }}>
+                      <span style={{ fontWeight: 700, color: "var(--bad)", fontSize: 12.5 }}>{money(td.totalVencido)}</span>
                       <button
                         type="button"
                         className="btn ghost"
-                        style={{ padding: "3px 7px", fontSize: 11 }}
+                        style={{ padding: "2px 6px", fontSize: 11 }}
                         onClick={() => setFichaCliente({ cliente: td.cliente, telefone: td.telefone })}
                       >
                         Ficha
@@ -1604,7 +1604,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
                         <button
                           type="button"
                           className="btn-baixa"
-                          style={{ padding: "3px 8px", fontSize: 11, background: "#25D366" }}
+                          style={{ padding: "2px 7px", fontSize: 11, background: "#25D366" }}
                           onClick={() => setWhats({ cliente: td.cliente, telefone: td.telefone, valor: td.totalVencido, vencimento: td.vencimentoMaisAntigo || undefined })}
                           title="Cobrar no WhatsApp"
                         >
@@ -1624,20 +1624,20 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       <div
         className="card"
         style={{
-          padding: "20px 22px",
+          padding: "16px 18px",
           background: "var(--card)",
           borderRadius: 14,
           border: "1px solid var(--line)",
           boxShadow: "var(--shadow-xs)",
-          marginBottom: 28,
+          marginBottom: 24,
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12, flexWrap: "wrap", gap: 8 }}>
           <div>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+            <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
               ESTRATIFICAÇÃO DE RISCO
             </div>
-            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
+            <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 2, letterSpacing: "-0.02em" }}>
               Régua de Envelhecimento da Inadimplência (Aging)
             </div>
           </div>
@@ -1646,7 +1646,7 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
               type="button"
               className="btn ghost"
               onClick={() => onNavegarAba("renegociacao")}
-              style={{ fontSize: 12, padding: "5px 12px" }}
+              style={{ fontSize: 11.5, padding: "4px 10px" }}
             >
               Abrir Central de Renegociação →
             </button>
@@ -1654,29 +1654,29 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         </div>
 
         {/* Mini cards compactos das faixas de atraso */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 8 }}>
           {faixasAging.filter(f => f.id !== "hoje").map(f => (
             <div
               key={f.id}
               style={{
                 background: "var(--soft)",
-                borderRadius: 10,
+                borderRadius: 8,
                 border: "1px solid var(--line)",
-                borderLeft: `4px solid ${f.cor}`,
-                padding: "10px 12px",
+                borderLeft: `3px solid ${f.cor}`,
+                padding: "8px 10px",
                 display: "flex",
                 flexDirection: "column",
                 gap: 2,
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: 11, fontWeight: 700, color: f.cor }}>{f.diasLabel}</span>
-                <span style={{ fontSize: 10.5, color: "var(--mut)", fontWeight: 600 }}>{f.qtd} tit.</span>
+                <span style={{ fontSize: 10.5, fontWeight: 700, color: f.cor }}>{f.diasLabel}</span>
+                <span style={{ fontSize: 10, color: "var(--mut)", fontWeight: 600 }}>{f.qtd} tit.</span>
               </div>
-              <div style={{ fontSize: 15, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>
+              <div style={{ fontSize: 13.5, fontWeight: 700, color: "var(--ink)", marginTop: 2 }}>
                 {money(f.valor)}
               </div>
-              <div style={{ fontSize: 10.5, color: "var(--mut)", marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: "var(--mut)", marginTop: 1 }}>
                 {f.porcentagemDoVencido > 0 ? `${f.porcentagemDoVencido.toFixed(1)}% do vencido` : "—"}
               </div>
             </div>
