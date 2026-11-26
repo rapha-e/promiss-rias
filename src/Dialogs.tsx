@@ -826,7 +826,7 @@ export function Editor({
     setErr("");
 
     if (row) {
-      // Edição de promissória existente
+      // Edição cadastral de promissória existente (sem alteração de valores financeiros)
       const nomeAntigo = (row.cliente_nome || "").trim().toUpperCase();
       const novoNome = n.trim().toUpperCase();
       const novoTel = p.trim();
@@ -834,9 +834,6 @@ export function Editor({
       const payload: Record<string, any> = {
         cliente_nome: novoNome,
         telefone: novoTel,
-        divida_total: T,
-        parcelas: i.trim(),
-        valor_pago: G,
         vencimento: d || null,
       };
       if (obsParcela.trim()) {
@@ -970,7 +967,7 @@ export function Editor({
           {row
             ? modoEdicao === "compra_total"
               ? (tipoAjusteUnificacao === "troca_menor_valor" ? "Troca por Menor Valor / Reparcelamento" : "Renegociar / Reparcelar Dívida")
-              : `Editar Parcela (${row.parcelas || "1X"})`
+              : `Editar Dados Cadastrais (${row.parcelas || "1X"})`
             : "Nova promissória"}
         </h2>
         <div ref={containerNomeRef} style={{ position: "relative" }}>
@@ -1765,28 +1762,56 @@ export function Editor({
             </div>
           </div>
         ) : (
-          /* MODO: EDITAR PARCELA PONTUAL */
+          /* MODO: EDIÇÃO CADASTRAL (NÃO FINANCEIRA) */
           <>
-            <div className="r2">
-              <label>Dívida desta parcela (R$)<input value={t} onChange={e => setT(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" required /></label>
-              <label>Valor pago (R$)<input value={g} onChange={e => setG(formatarMascaraMoeda(e.target.value, true))} inputMode="numeric" placeholder="R$ 0,00" /></label>
-            </div>
-            <div className="r2">
-              <label>Parcelas<input value={i} onChange={e => setI(e.target.value)} maxLength={40} placeholder="ex.: 1/3" /></label>
-              <label>Vencimento<input type="date" value={d} onChange={e => setD(e.target.value)} /></label>
-            </div>
+            <label>
+              Data de Vencimento
+              <input type="date" value={d} onChange={e => setD(e.target.value)} required />
+            </label>
             <label>
               Observação (opcional)
               <input
                 value={obsParcela}
                 onChange={e => setObsParcela(e.target.value)}
                 maxLength={200}
-                placeholder="ex.: Prorrogação de vencimento combinada com o cliente"
+                placeholder="ex.: Prorrogação de vencimento ou atualização cadastral"
               />
             </label>
-            <div className="prev">
-              <span>Saldo <b className="mono">{ok ? money(Math.max(T - G, 0)) : "—"}</b></span>
-              {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
+
+            {/* Resumo financeiro somente leitura */}
+            <div
+              style={{
+                background: "var(--soft)",
+                border: "1px solid var(--line)",
+                borderRadius: 10,
+                padding: "10px 12px",
+                display: "grid",
+                gap: 6,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11.5, color: "var(--mut)" }}>
+                <span style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  Resumo Financeiro (Somente Leitura)
+                </span>
+                {st && !row?.fundo_perdido && <span className={`pill p-${cls(st)}`}>{LBL[st]}</span>}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, fontSize: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Valor da parcela</div>
+                  <div className="mono" style={{ fontWeight: 700, color: "var(--ink)" }}>{money(row?.divida_total ?? 0)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Valor pago</div>
+                  <div className="mono" style={{ fontWeight: 700, color: "#059669" }}>{money(row?.valor_pago ?? 0)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 10.5, color: "var(--mut)" }}>Saldo devedor</div>
+                  <div className="mono" style={{ fontWeight: 700, color: "var(--ink)" }}>{money(row?.saldo_devedor ?? 0)}</div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--mut)", borderTop: "1px dashed var(--line)", paddingTop: 6 }}>
+                💡 Para alterar valores, conceder descontos, registrar troca ou reparcelar, utilize <b>Renegociar / Troca</b> na Ficha do Cliente.
+              </div>
             </div>
 
             {infoCarne && d && (

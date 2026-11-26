@@ -112,7 +112,6 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
   const [baixa, setBaixa] = useState<Row | null>(null);
   const [logRow, setLogRow] = useState<Row | null>(null);
   const [editing, setEditing] = useState<Row | null | undefined>(undefined);
-  const [renegociandoRow, setRenegociandoRow] = useState<Row | null>(null);
   const [escolherCompraCliente, setEscolherCompraCliente] = useState<ClienteConsolidado | null>(null);
   const [perdido, setPerdido] = useState<Row | null>(null);
   const [whats, setWhats] = useState<Row | null>(null);
@@ -1965,19 +1964,9 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
                             setEditing(refRow);
                           }
                         }}
-                        title={cli.temMultiplasComprasAbertas ? "Escolher qual parcela editar" : "Edição cadastral rápida da parcela"}
+                        title={cli.temMultiplasComprasAbertas ? "Escolher qual parcela editar" : "Editar dados cadastrais (nome, telefone, vencimento)"}
                       >
                         Editar
-                      </button>
-                    )}
-                    {isAdmin && !cli.fundo_perdido && cli.saldo_devedor > 0 && (
-                      <button
-                        className="ed"
-                        style={{ color: "var(--brand)", borderColor: "rgba(15,118,110,0.4)", fontWeight: 700 }}
-                        onClick={() => setRenegociandoRow(refRow)}
-                        title="Renegociar, reparcelar (1x a 12x) ou registrar troca de produto"
-                      >
-                        Reparcelar
                       </button>
                     )}
                     {isAdmin && (cli.fundo_perdido || cli.saldo_devedor > 0) && (
@@ -2019,7 +2008,6 @@ export default function Promissorias({ isAdmin }: { isAdmin: boolean }) {
       )}
       {logRow && <LogDialog row={logRow} onClose={() => setLogRow(null)} />}
       {editing !== undefined && <Editor row={editing} modoInicial="parcela" onClose={() => setEditing(undefined)} onSaved={() => { setEditing(undefined); refresh(); }} />}
-      {renegociandoRow && <Editor row={renegociandoRow} modoInicial="compra_total" onClose={() => setRenegociandoRow(null)} onSaved={() => { setRenegociandoRow(null); refresh(); }} />}
       {perdido && <PerdidoDialog row={perdido} onClose={() => setPerdido(null)} onDone={() => { setPerdido(null); refresh(); }} />}
       {whats && (
         <WhatsDialog
