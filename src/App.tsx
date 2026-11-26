@@ -35,7 +35,6 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { hasError: boole
 
 const Dashboard = lazy(() => import("./Dashboard"));
 const Promissorias = lazy(() => import("./Promissorias"));
-const Clientes = lazy(() => import("./Clientes"));
 const RenegociacaoCobranca = lazy(() => import("./RenegociacaoCobranca"));
 const PromessasPagamento = lazy(() => import("./PromessasPagamento"));
 
@@ -78,7 +77,6 @@ function Login() {
 const TABS = [
   ["dashboard", "Dashboard"],
   ["promissorias", "Promissórias"],
-  ["clientes", "Clientes"],
   ["renegociacao", "Renegociação & Cobrança"],
   ["promessas", "Agendar Promessa"],
 ] as const;
@@ -109,7 +107,6 @@ function Shell({ session }: { session: Session }) {
           <Suspense fallback={<div style={{ padding: 48, textAlign: "center", color: "var(--mut)", fontSize: 14 }}>Carregando módulo…</div>}>
             {tab === "dashboard" && <Dashboard onNavegarAba={(t) => setTab(t as Tab)} />}
             {tab === "promissorias" && <Promissorias isAdmin={isAdmin} />}
-            {tab === "clientes" && <Clientes isAdmin={isAdmin} />}
             {tab === "renegociacao" && <RenegociacaoCobranca />}
             {tab === "promessas" && <PromessasPagamento />}
           </Suspense>

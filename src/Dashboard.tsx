@@ -80,6 +80,95 @@ export type DadosRecuperacaoMes = {
   };
 };
 
+export interface RecebimentoRecente {
+  id: string | number;
+  promissoriaId?: number;
+  clienteNome: string;
+  telefone?: string;
+  iniciais: string;
+  corAvatar: string;
+  descricao: string;
+  valor: number;
+  data: string;
+  tempoRelativo: string;
+  detalhes?: string;
+}
+
+const PALETA_AVATARES = [
+  "#2d6a4f", // verde floresta escuro
+  "#c97a1e", // mostarda dourada
+  "#475569", // ardósia escuro
+  "#9e5a52", // terracota bordô
+  "#0284c7", // azul oceano
+  "#7c3aed", // violeta nobre
+  "#0d9488", // verde petróleo
+  "#b45309", // âmbar
+  "#be123c", // carmesim
+];
+
+function obterIniciaisNome(nome: string): string {
+  if (!nome) return "CL";
+  const partes = nome.trim().split(/\s+/).filter(Boolean);
+  if (partes.length === 0) return "CL";
+  if (partes.length === 1) {
+    return partes[0].slice(0, 2).toUpperCase();
+  }
+  return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase();
+}
+
+function obterCorAvatar(nome: string): string {
+  let hash = 0;
+  for (let i = 0; i < nome.length; i++) {
+    hash = (hash << 5) - hash + nome.charCodeAt(i);
+    hash |= 0;
+  }
+  const idx = Math.abs(hash) % PALETA_AVATARES.length;
+  return PALETA_AVATARES[idx];
+}
+
+function formatarTempoRelativo(dataIso: string): string {
+  if (!dataIso) return "";
+  const agora = Date.now();
+  const d = new Date(dataIso);
+  const dataMs = d.getTime();
+  if (isNaN(dataMs)) return dataIso.slice(0, 10);
+  const diffSeg = Math.max(0, Math.floor((agora - dataMs) / 1000));
+  const diffMin = Math.floor(diffSeg / 60);
+  const diffHoras = Math.floor(diffMin / 60);
+  const diffDias = Math.floor(diffHoras / 24);
+
+  if (diffMin < 1) return "agora mesmo";
+  if (diffMin < 60) return `há ${diffMin} min`;
+  if (diffHoras < 24) return `há ${diffHoras} h`;
+  if (diffDias === 1) return "ontem";
+  if (diffDias < 7) return `há ${diffDias} dias`;
+  return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+}
+
+function deduzirDescricaoRecebimento(
+  detalhes?: string,
+  parcelas?: string,
+  saldoDevedor?: number
+): string {
+  let forma = "Pix";
+  const dLow = (detalhes || "").toLowerCase();
+  if (dLow.includes("dinheiro")) forma = "Dinheiro";
+  else if (dLow.includes("cartão") || dLow.includes("cartao") || dLow.includes("crédito") || dLow.includes("debito") || dLow.includes("débito")) forma = "Cartão";
+  else if (dLow.includes("ted") || dLow.includes("transfer")) forma = "TED";
+  else if (dLow.includes("pix")) forma = "Pix";
+
+  if (saldoDevedor !== undefined && saldoDevedor <= 0) {
+    return `Quitação · ${forma}`;
+  }
+  if (parcelas) {
+    return `Parcela ${parcelas} · ${forma}`;
+  }
+  if (dLow.includes("sinal") || dLow.includes("entrada")) {
+    return `Entrada · ${forma}`;
+  }
+  return `Parcela · ${forma}`;
+}
+
 export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: string, filtro?: string) => void }) {
   const [resumo, setResumo] = useState<ResumoRPC | null>(null);
   const [abertas, setAbertas] = useState<PromissoriaResumida[]>([]);
@@ -90,6 +179,10 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
   const [whats, setWhats] = useState<{ cliente: string; telefone: string; valor: number; vencimento?: string } | null>(null);
   const [menuExportar, setMenuExportar] = useState(false);
   const [promessas, setPromessas] = useState<PromessaPagamento[]>([]);
+  const [recebimentos, setRecebimentos] = useState<RecebimentoRecente[]>([]);
+  const [loadingRecebimentos, setLoadingRecebimentos] = useState(false);
+  const [modalTodosRecebimentos, setModalTodosRecebimentos] = useState(false);
+  const [buscaRecebimento, setBuscaRecebimento] = useState("");
   const carregarPromessasDashboard = useCallback(async () => {
     try {
       const { data, error } = await supabase
@@ -126,6 +219,124 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
     marcarPromessaCumprida(id);
     await carregarPromessasDashboard();
   };
+
+  const carregarRecebimentosRecentes = useCallback(async () => {
+    setLoadingRecebimentos(true);
+    try {
+      const lista: RecebimentoRecente[] = [];
+      const chavesVistas = new Set<string>();
+
+      // 1. Consulta promissoria_pagamentos com relação a promissorias
+      try {
+        const { data: pags, error: errPags } = await supabase
+          .from("promissoria_pagamentos")
+          .select(`
+            id,
+            promissoria_id,
+            valor_pago,
+            data_pagamento,
+            detalhes,
+            operador_email,
+            promissorias (
+              id,
+              cliente_nome,
+              telefone,
+              parcelas,
+              divida_total,
+              valor_pago,
+              saldo_devedor,
+              origem
+            )
+          `)
+          .order("data_pagamento", { ascending: false })
+          .limit(40);
+
+        if (!errPags && pags) {
+          for (const p of pags) {
+            if (p.detalhes && (
+              p.detalhes.includes("Troca por produto") ||
+              p.detalhes.includes("Troca por óculos") ||
+              p.detalhes.includes("Unificação e reparcelamento") ||
+              p.detalhes.includes("REPACTUACAO_BAIXA") ||
+              p.detalhes.includes("Acordo de Repactuação")
+            )) {
+              continue;
+            }
+            const prom = (p.promissorias as any);
+            const nome = prom?.cliente_nome?.trim() || "Cliente";
+            const chave = `${p.promissoria_id}_${p.data_pagamento}_${p.valor_pago}`;
+            if (chavesVistas.has(chave)) continue;
+            chavesVistas.add(chave);
+
+            lista.push({
+              id: p.id,
+              promissoriaId: p.promissoria_id,
+              clienteNome: nome,
+              telefone: prom?.telefone,
+              iniciais: obterIniciaisNome(nome),
+              corAvatar: obterCorAvatar(nome),
+              descricao: deduzirDescricaoRecebimento(p.detalhes, prom?.parcelas, prom?.saldo_devedor),
+              valor: Number(p.valor_pago) || 0,
+              data: p.data_pagamento || new Date().toISOString(),
+              tempoRelativo: formatarTempoRelativo(p.data_pagamento),
+              detalhes: p.detalhes,
+            });
+          }
+        }
+      } catch (_) {}
+
+      // 2. Fallback / Complemento: promissórias com baixas registradas em 'origem'
+      if (lista.length < 15) {
+        try {
+          const { data: baixasOrigem } = await supabase
+            .from("promissorias")
+            .select("id, cliente_nome, telefone, parcelas, saldo_devedor, divida_total, valor_pago, origem")
+            .gt("valor_pago", 0)
+            .order("id", { ascending: false })
+            .limit(30);
+
+          if (baixasOrigem) {
+            for (const row of baixasOrigem) {
+              const nome = row.cliente_nome?.trim() || "Cliente";
+              if (row.origem) {
+                try {
+                  const logs = JSON.parse(row.origem);
+                  if (Array.isArray(logs)) {
+                    for (const log of logs) {
+                      if (log.valor && log.valor > 0 && log.data) {
+                        if (log.acordo?.tipo === "REPACTUACAO_BAIXA" || log.acordo?.tipo === "TROCA_PRODUTO_MENOR_VALOR" || log.acordo?.tipo === "TROCA_PRODUTO") continue;
+                        const chave = `${row.id}_${log.data}_${log.valor}`;
+                        if (chavesVistas.has(chave)) continue;
+                        chavesVistas.add(chave);
+                        lista.push({
+                          id: `origem_${chave}`,
+                          promissoriaId: row.id,
+                          clienteNome: nome,
+                          telefone: row.telefone,
+                          iniciais: obterIniciaisNome(nome),
+                          corAvatar: obterCorAvatar(nome),
+                          descricao: deduzirDescricaoRecebimento(log.detalhes, row.parcelas, row.saldo_devedor),
+                          valor: Number(log.valor) || 0,
+                          data: log.data,
+                          tempoRelativo: formatarTempoRelativo(log.data),
+                          detalhes: log.detalhes,
+                        });
+                      }
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      lista.sort((a, b) => new Date(b.data).getTime() - new Date(a.data).getTime());
+      setRecebimentos(lista);
+    } finally {
+      setLoadingRecebimentos(false);
+    }
+  }, []);
   
   // Modos de Meta: "inadimplentes" (crédito vencido recuperado) ou "global" (total recebido em caixa)
   const [modoMeta, setModoMeta] = useState<"inadimplentes" | "global">(() => {
@@ -349,16 +560,25 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
       } catch (_) {
         setPromessas(obterPromessasPagamento());
       }
+      try {
+        await carregarRecebimentosRecentes();
+      } catch (_) {}
     } catch (e: any) {
       setError(e.message || "Erro ao carregar dados do dashboard.");
     } finally {
       setLoading(false);
     }
-  }, [dataHoje]);
+  }, [dataHoje, carregarRecebimentosRecentes, carregarPromessasDashboard]);
 
   useEffect(() => {
     carregarDados();
   }, [carregarDados]);
+
+  const recebimentosFiltrados = useMemo(() => {
+    if (!buscaRecebimento.trim()) return recebimentos;
+    const b = buscaRecebimento.trim().toLowerCase();
+    return recebimentos.filter(r => r.clienteNome.toLowerCase().includes(b) || r.descricao.toLowerCase().includes(b));
+  }, [recebimentos, buscaRecebimento]);
 
   // Cálculos consolidados
   const metricas = useMemo(() => {
@@ -1449,95 +1669,141 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
         })()}
       </div>
 
-      {/* BLOCO 2: Termômetro da Carteira (Barra Gráfica de Saúde) */}
+      {/* BLOCO 2: FLUXO DE CAIXA / Recebimentos recentes */}
       <div
         className="card"
         style={{
-          padding: 16,
+          padding: "20px 24px",
           marginBottom: 24,
           display: "flex",
           flexDirection: "column",
-          gap: 10,
+          gap: 0,
+          background: "var(--card, #ffffff)",
+          borderRadius: 14,
+          border: "1px solid var(--line)",
+          boxShadow: "0 1px 3px rgba(0, 0, 0, 0.04)",
         }}
       >
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
-          <div style={{ fontWeight: 700, fontSize: 13, textTransform: "uppercase", letterSpacing: ".05em" }}>
-            Composição da Carteira de Crédito
-          </div>
-          <div style={{ fontSize: 12, color: "var(--mut)" }}>
-            Base total: {money(metricas.totalDivida)} ({metricas.totalPromissorias.toLocaleString("pt-BR")} títulos)
-          </div>
-        </div>
-
-        {/* Barra de Progresso Segmentada */}
-        <div
-          style={{
-            height: 18,
-            width: "100%",
-            borderRadius: 8,
-            overflow: "hidden",
-            display: "flex",
-            background: "var(--line)",
-          }}
-        >
-          {/* Quitado */}
-          <div
-            style={{
-              width: `${(metricas.totalPago / (metricas.totalDivida || 1)) * 100}%`,
-              background: "#16a34a",
-              transition: "width .3s ease",
-            }}
-            title={`Quitado: ${money(metricas.totalPago)} (${((metricas.totalPago / (metricas.totalDivida || 1)) * 100).toFixed(1)}%)`}
-          />
-          {/* A Vencer (Em dia) */}
-          <div
-            style={{
-              width: `${(metricas.aVencerValor / (metricas.totalDivida || 1)) * 100}%`,
-              background: "#0284c7",
-              transition: "width .3s ease",
-            }}
-            title={`A vencer (em dia): ${money(metricas.aVencerValor)} (${((metricas.aVencerValor / (metricas.totalDivida || 1)) * 100).toFixed(1)}%)`}
-          />
-          {/* Vencido (Atraso) */}
-          <div
-            style={{
-              width: `${(metricas.totalVencidoValor / (metricas.totalDivida || 1)) * 100}%`,
-              background: "#dc2626",
-              transition: "width .3s ease",
-            }}
-            title={`Em atraso: ${money(metricas.totalVencidoValor)} (${((metricas.totalVencidoValor / (metricas.totalDivida || 1)) * 100).toFixed(1)}%)`}
-          />
-          {/* Fundo Perdido */}
-          <div
-            style={{
-              width: `${(metricas.totalPerdido / (metricas.totalDivida || 1)) * 100}%`,
-              background: "#64748b",
-              transition: "width .3s ease",
-            }}
-            title={`Fundo Perdido: ${money(metricas.totalPerdido)} (${((metricas.totalPerdido / (metricas.totalDivida || 1)) * 100).toFixed(1)}%)`}
-          />
-        </div>
-
-        {/* Legenda da Barra */}
-        <div style={{ display: "flex", gap: 16, flexWrap: "wrap", fontSize: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: "#16a34a" }} />
-            <span>Quitado: <b>{money(metricas.totalPago)}</b></span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: "#0284c7" }} />
-            <span>Em dia (A vencer): <b>{money(metricas.aVencerValor)}</b></span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ width: 10, height: 10, borderRadius: 2, background: "#dc2626" }} />
-            <span>Em atraso: <b>{money(metricas.totalVencidoValor)}</b></span>
-          </div>
-          {metricas.totalPerdido > 0 && (
-            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ width: 10, height: 10, borderRadius: 2, background: "#64748b" }} />
-              <span>Fundo perdido: <b>{money(metricas.totalPerdido)}</b></span>
+        {/* Cabeçalho */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+              FLUXO DE CAIXA
             </div>
-          )}
+            <div style={{ fontSize: 18, fontWeight: 700, color: "var(--ink)", marginTop: 3 }}>
+              Recebimentos recentes
+            </div>
+          </div>
+          <button
+            type="button"
+            className="btn ghost"
+            onClick={() => carregarRecebimentosRecentes()}
+            style={{ padding: "4px 8px", fontSize: 16, color: "var(--mut)", borderRadius: 6, lineHeight: 1 }}
+            title="Atualizar recebimentos recentes"
+          >
+            ⋯
+          </button>
+        </div>
+
+        {/* Lista de Recebimentos */}
+        {loadingRecebimentos && recebimentos.length === 0 ? (
+          <div style={{ padding: "28px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+            Carregando recebimentos recentes…
+          </div>
+        ) : recebimentos.length === 0 ? (
+          <div style={{ padding: "28px 0", textAlign: "center", color: "var(--mut)", fontSize: 13 }}>
+            Nenhum recebimento registrado recentemente.
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            {recebimentos.slice(0, 5).map((rec, idx, arr) => (
+              <div
+                key={rec.id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  padding: "13px 0",
+                  borderBottom: idx === arr.length - 1 ? "none" : "1px solid #f1f5f9",
+                  transition: "background-color 0.15s ease",
+                }}
+              >
+                {/* Lado Esquerdo: Avatar + Nome + Descrição */}
+                <div style={{ display: "flex", alignItems: "center", gap: 14, minWidth: 0 }}>
+                  <div
+                    style={{
+                      width: 40,
+                      height: 40,
+                      borderRadius: "50%",
+                      backgroundColor: rec.corAvatar,
+                      color: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      letterSpacing: "0.02em",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {rec.iniciais}
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: 14,
+                        color: "var(--ink)",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        cursor: "pointer",
+                      }}
+                      title={rec.clienteNome}
+                      onClick={() => setFichaCliente({ cliente: rec.clienteNome, telefone: rec.telefone })}
+                    >
+                      {rec.clienteNome}
+                    </div>
+                    <div style={{ fontSize: 12, color: "var(--mut)", marginTop: 2 }}>
+                      {rec.descricao}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Lado Direito: Valor + Tempo Relativo */}
+                <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 16 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14.5, color: "var(--ink)" }}>
+                    {money(rec.valor)}
+                  </div>
+                  <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 2 }}>
+                    {rec.tempoRelativo}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Rodapé */}
+        <div style={{ paddingTop: 14, marginTop: 4, borderTop: recebimentos.length > 0 ? "1px solid #f1f5f9" : "none" }}>
+          <button
+            type="button"
+            onClick={() => setModalTodosRecebimentos(true)}
+            style={{
+              background: "none",
+              border: "none",
+              padding: 0,
+              color: "var(--ink)",
+              fontWeight: 700,
+              fontSize: 13,
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 6,
+              cursor: "pointer",
+            }}
+          >
+            Ver todos os recebimentos ↗
+          </button>
         </div>
       </div>
 
@@ -1750,6 +2016,115 @@ export default function Dashboard({ onNavegarAba }: { onNavegarAba?: (aba: strin
           onClose={() => setWhats(null)}
           onTelefoneAtualizado={() => carregarDados()}
         />
+      )}
+
+      {/* MODAL: Todos os Recebimentos Recentes */}
+      {modalTodosRecebimentos && (
+        <div className="modal-backdrop" onClick={() => setModalTodosRecebimentos(false)}>
+          <div
+            className="modal"
+            onClick={e => e.stopPropagation()}
+            style={{ maxWidth: 640, width: "100%", maxHeight: "85vh", display: "flex", flexDirection: "column" }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", paddingBottom: 12, borderBottom: "1px solid var(--line)" }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--mut)", textTransform: "uppercase" }}>
+                  FLUXO DE CAIXA
+                </div>
+                <h3 style={{ margin: "2px 0 0 0", fontSize: 18 }}>Todos os Recebimentos Recentes</h3>
+              </div>
+              <button type="button" className="btn ghost" onClick={() => setModalTodosRecebimentos(false)}>✕</button>
+            </div>
+
+            <div style={{ padding: "12px 0", display: "flex", gap: 10, alignItems: "center" }}>
+              <input
+                type="search"
+                placeholder="Filtrar por nome de cliente..."
+                value={buscaRecebimento}
+                onChange={e => setBuscaRecebimento(e.target.value)}
+                style={{ flex: 1 }}
+              />
+              <div style={{ fontSize: 12, color: "var(--mut)", whiteSpace: "nowrap" }}>
+                Total: <b>{money(recebimentosFiltrados.reduce((acc, r) => acc + r.valor, 0))}</b> ({recebimentosFiltrados.length})
+              </div>
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1, paddingRight: 4 }}>
+              {recebimentosFiltrados.length === 0 ? (
+                <div style={{ textAlign: "center", padding: 30, color: "var(--mut)" }}>
+                  Nenhum recebimento encontrado.
+                </div>
+              ) : (
+                recebimentosFiltrados.map((rec, idx) => (
+                  <div
+                    key={rec.id || idx}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      padding: "12px 0",
+                      borderBottom: idx === recebimentosFiltrados.length - 1 ? "none" : "1px solid #f1f5f9",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, minWidth: 0 }}>
+                      <div
+                        style={{
+                          width: 38,
+                          height: 38,
+                          borderRadius: "50%",
+                          backgroundColor: rec.corAvatar,
+                          color: "#fff",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          fontWeight: 700,
+                          fontSize: 12.5,
+                          flexShrink: 0,
+                        }}
+                      >
+                        {rec.iniciais}
+                      </div>
+                      <div style={{ minWidth: 0 }}>
+                        <div
+                          style={{
+                            fontWeight: 700,
+                            fontSize: 13.5,
+                            color: "var(--ink)",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            cursor: "pointer",
+                          }}
+                          onClick={() => {
+                            setModalTodosRecebimentos(false);
+                            setFichaCliente({ cliente: rec.clienteNome, telefone: rec.telefone });
+                          }}
+                        >
+                          {rec.clienteNome}
+                        </div>
+                        <div style={{ fontSize: 11.5, color: "var(--mut)", marginTop: 1 }}>
+                          {rec.descricao} {rec.telefone ? `· ${mascaraTelefone(rec.telefone)}` : ""}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 12 }}>
+                      <div style={{ fontWeight: 700, fontSize: 14, color: "var(--ink)" }}>
+                        {money(rec.valor)}
+                      </div>
+                      <div style={{ fontSize: 11, color: "var(--mut)", marginTop: 1 }}>
+                        {rec.tempoRelativo}
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "flex-end", paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+              <button type="button" className="btn" onClick={() => setModalTodosRecebimentos(false)}>Fechar</button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
