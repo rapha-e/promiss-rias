@@ -83,6 +83,20 @@ export const dtHora = (iso?: string | null) => {
   }
 };
 
+/** Formata data e hora no fuso horário de Brasília (America/Sao_Paulo) no formato DD/MM/AAAA às HH:mm */
+export const dtHoraMin = (iso?: string | null) => {
+  if (!iso) return "—";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const dataStr = d.toLocaleDateString("pt-BR", { timeZone: "America/Sao_Paulo" });
+    const horaStr = d.toLocaleTimeString("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
+    return `${dataStr} às ${horaStr}`;
+  } catch {
+    return iso;
+  }
+};
+
 export function deriveStatus(r: {
   status?: string;
   fundo_perdido?: boolean;

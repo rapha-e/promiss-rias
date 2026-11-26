@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { supabase } from "./supabase";
 import {
-  LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, formatarTelefone,
+  LBL, alerta, alertaTexto, cls, derive, deriveStatus, dt, dtHora, dtHoraMin, formatarTelefone,
   getDDD, hoje, linkWhatsApp, mascaraTelefone, mensagemCobranca, mensagemComprovanteBaixa, money, normalizarTelefones, parse, setDDD, somaDias, toBRL,
   calcularScoreCliente, extrairInfoParcelas, formatarValorSemCifrao,
   gerarParcelasDesmembradas, obterVencimentoEfetivo, somaMeses, ajustarApenasDia,
@@ -2875,8 +2875,7 @@ export function FichaCliente({
             {exibirHistoricoCobranca && (
               <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10, borderTop: "1px solid var(--line)", paddingTop: 10 }}>
                 {historicoCobrancas.map(h => {
-                  const d = new Date(h.data);
-                  const dataFormatada = d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+                  const dataFormatada = dtHoraMin(h.data);
                   return (
                     <div
                       key={h.id}
@@ -2979,7 +2978,7 @@ export function FichaCliente({
                           <div>
                             <div style={{ fontWeight: 800, fontSize: 14, color: "var(--ink)" }}>{op.titulo}</div>
                             <div style={{ fontSize: 11.5, color: "var(--mut)" }}>
-                              {op.data ? `Operação em ${dt(op.data.slice(0, 10))} ${op.data.length > 10 ? op.data.slice(11, 16) : ""}` : "Data não registrada"}
+                              {op.data ? `Operação em ${dtHoraMin(op.data)}` : "Data não registrada"}
                               {op.operador && <> · Operador: <b>{op.operador}</b></>}
                             </div>
                           </div>
