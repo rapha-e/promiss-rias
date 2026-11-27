@@ -550,14 +550,65 @@ export function Editor({
 
   async function handleDelete() {
     if (!row) return;
-    const confirmou = window.confirm(
-      `Deseja realmente EXCLUIR permanentemente a promissória de ${row.cliente_nome} no valor de ${money(row.divida_total)}?\n\n` +
-      `Atenção: Esta ação é definitiva e removerá este título do sistema e de todos os relatórios.`
+    const motivoInput = window.prompt(
+      `Deseja realmente EXCLUIR permanentemente a promissória ${row.parcelas || ""} de ${row.cliente_nome} no valor de ${money(row.divida_total)}?\n\n` +
+      `Atenção: Esta ação é definitiva e ficará registrada no log de auditoria.\n` +
+      `Informe o motivo da exclusão para confirmar:`
     );
-    if (!confirmou) return;
+    if (motivoInput === null) return;
+    const motivo = motivoInput.trim();
+    if (!motivo) {
+      setErr("Informe o motivo da exclusão para confirmar a operação.");
+      return;
+    }
 
     setBusy(true);
     setErr("");
+
+    const agoraIso = new Date().toISOString();
+    let operadorEmail = "Operador";
+    try {
+      const { data: userData } = await supabase.auth.getUser();
+      if (userData?.user?.email) operadorEmail = userData.user.email;
+    } catch (_) {}
+
+    const snapshotExclusao = {
+      id: row.id,
+      cliente_nome: (row.cliente_nome || "").trim().toUpperCase(),
+      telefone: row.telefone || "",
+      parcelas: row.parcelas || "1X",
+      divida_total: row.divida_total ?? 0,
+      valor_pago: row.valor_pago ?? 0,
+      saldo_devedor: row.saldo_devedor ?? 0,
+      vencimento: row.vencimento || null,
+      operador: operadorEmail,
+      motivo,
+      excluida_em: agoraIso,
+    };
+
+    // 1. Grava auditoria de exclusão em automacao_logs (tabela independente, não afetada por ON DELETE CASCADE)
+    try {
+      await supabase.from("automacao_logs").insert({
+        origem: "EXCLUSAO_PROMISSORIA",
+        nivel: "warn",
+        referencia_id: String(row.id),
+        mensagem: `Promissória #${row.id} (${snapshotExclusao.parcelas}) de ${snapshotExclusao.cliente_nome} no valor de ${money(snapshotExclusao.divida_total)} excluída por ${operadorEmail}. Motivo: ${motivo}`,
+        detalhes: snapshotExclusao,
+      });
+    } catch (eLog) {
+      console.warn("Aviso ao registrar log de exclusão no banco:", eLog);
+    }
+
+    // Backup local resiliente de auditoria
+    try {
+      const chaveLs = "leooticas_exclusoes_log_v1";
+      const prev = JSON.parse(localStorage.getItem(chaveLs) || "[]");
+      const lista = Array.isArray(prev) ? prev : [];
+      lista.unshift(snapshotExclusao);
+      localStorage.setItem(chaveLs, JSON.stringify(lista.slice(0, 300)));
+    } catch (_) {}
+
+    // 2. Executa a exclusão definitiva da promissória
     const { error } = await supabase.from("promissorias").delete().eq("id", row.id);
     setBusy(false);
     if (error) return setErr("Não foi possível excluir: " + error.message);
@@ -2244,8 +2295,87 @@ export function FichaCliente({
   };
 
   const [historicoCobrancas, setHistoricoCobrancas] = useState<{ id: number; data: string; canal: string; usuario: string; msg: string }[]>([]);
+  const [exclusoesHistorico, setExclusoesHistorico] = useState<{
+    id: string;
+    data: string;
+    parcelas: string;
+    divida_total: number;
+    valor_pago: number;
+    saldo_devedor: number;
+    vencimento?: string | null;
+    operador: string;
+    motivo: string;
+  }[]>([]);
   const [exibirHistoricoCobranca, setExibirHistoricoCobranca] = useState(false);
   const [exibirHistoricoCompras, setExibirHistoricoCompras] = useState(false);
+
+  const carregarExclusoesHistorico = useCallback(async () => {
+    const cliNorm = cliente.trim().toUpperCase();
+    const mapa = new Map<string, {
+      id: string;
+      data: string;
+      parcelas: string;
+      divida_total: number;
+      valor_pago: number;
+      saldo_devedor: number;
+      vencimento?: string | null;
+      operador: string;
+      motivo: string;
+    }>();
+
+    try {
+      const { data } = await supabase
+        .from("automacao_logs")
+        .select("id, created_at, referencia_id, mensagem, detalhes")
+        .eq("origem", "EXCLUSAO_PROMISSORIA")
+        .order("created_at", { ascending: false })
+        .limit(200);
+      if (data) {
+        for (const rowLog of data as any[]) {
+          const det = rowLog.detalhes || {};
+          const nomeLog = String(det.cliente_nome || "").trim().toUpperCase();
+          if (nomeLog !== cliNorm) continue;
+          const chave = `${det.id || rowLog.referencia_id || rowLog.id}_${det.excluida_em || rowLog.created_at}`;
+          mapa.set(chave, {
+            id: `excl_db_${rowLog.id}`,
+            data: det.excluida_em || rowLog.created_at || "",
+            parcelas: det.parcelas || "1X",
+            divida_total: Number(det.divida_total) || 0,
+            valor_pago: Number(det.valor_pago) || 0,
+            saldo_devedor: Number(det.saldo_devedor) || 0,
+            vencimento: det.vencimento || null,
+            operador: det.operador || "Operador",
+            motivo: det.motivo || rowLog.mensagem || "Exclusão registrada.",
+          });
+        }
+      }
+    } catch (_) {}
+
+    try {
+      const locais = JSON.parse(localStorage.getItem("leooticas_exclusoes_log_v1") || "[]");
+      if (Array.isArray(locais)) {
+        for (const det of locais) {
+          if (String(det.cliente_nome || "").trim().toUpperCase() !== cliNorm) continue;
+          const chave = `${det.id}_${det.excluida_em}`;
+          if (!mapa.has(chave)) {
+            mapa.set(chave, {
+              id: `excl_ls_${chave}`,
+              data: det.excluida_em || "",
+              parcelas: det.parcelas || "1X",
+              divida_total: Number(det.divida_total) || 0,
+              valor_pago: Number(det.valor_pago) || 0,
+              saldo_devedor: Number(det.saldo_devedor) || 0,
+              vencimento: det.vencimento || null,
+              operador: det.operador || "Operador",
+              motivo: det.motivo || "Exclusão registrada.",
+            });
+          }
+        }
+      }
+    } catch (_) {}
+
+    setExclusoesHistorico(Array.from(mapa.values()));
+  }, [cliente]);
 
   const carregarHistoricoCobrancas = useCallback(async () => {
     try {
@@ -2273,7 +2403,8 @@ export function FichaCliente({
     else setRows((data ?? []) as Row[]);
     carregarPromessaAtiva();
     carregarHistoricoCobrancas();
-  }, [cliente, carregarPromessaAtiva, carregarHistoricoCobrancas]);
+    carregarExclusoesHistorico();
+  }, [cliente, carregarPromessaAtiva, carregarHistoricoCobrancas, carregarExclusoesHistorico]);
 
   useEffect(() => {
     load();
@@ -2320,7 +2451,7 @@ export function FichaCliente({
       id: string;
       data: string;
       titulo: string;
-      tipo: "troca" | "repactuacao" | "fundo_perdido";
+      tipo: "troca" | "repactuacao" | "fundo_perdido" | "exclusao";
       operador: string;
       detalhes: string;
       saldoAnterior?: number;
@@ -2414,8 +2545,20 @@ export function FichaCliente({
       }
     }
 
+    for (const ex of exclusoesHistorico) {
+      lista.push({
+        id: ex.id,
+        data: ex.data,
+        titulo: `Parcela Excluída (${ex.parcelas})`,
+        tipo: "exclusao",
+        operador: ex.operador,
+        detalhes: `Motivo: ${ex.motivo}${ex.vencimento ? ` · Vencimento original: ${dt(ex.vencimento)}` : ""}${ex.valor_pago > 0 ? ` · Valor pago na ocasião: ${money(ex.valor_pago)}` : ""}`,
+        saldoAnterior: ex.divida_total,
+      });
+    }
+
     return lista.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
-  }, [rows]);
+  }, [rows, exclusoesHistorico]);
 
   const [filtroAba, setFiltroAba] = useState<"compra_ativa" | "quitadas" | "todas">("compra_ativa");
   const [compraIdSelecionada, setCompraIdSelecionada] = useState<string>("");
@@ -2985,8 +3128,8 @@ export function FichaCliente({
                 </div>
               ) : (
                 historicoOperacoes.map(op => {
-                  const corTema = op.tipo === "troca" ? "#0284c7" : op.tipo === "fundo_perdido" ? "#dc2626" : "#7e22ce";
-                  const icone = op.tipo === "troca" ? "👓" : op.tipo === "fundo_perdido" ? "⛔" : "🔀";
+                  const corTema = op.tipo === "troca" ? "#0284c7" : op.tipo === "fundo_perdido" ? "#dc2626" : op.tipo === "exclusao" ? "#b91c1c" : "#7e22ce";
+                  const icone = op.tipo === "troca" ? "👓" : op.tipo === "fundo_perdido" ? "⛔" : op.tipo === "exclusao" ? "🗑️" : "🔀";
                   return (
                     <div
                       key={op.id}
@@ -3020,7 +3163,7 @@ export function FichaCliente({
                             color: corTema,
                           }}
                         >
-                          {op.tipo === "troca" ? "Troca Realizada" : op.tipo === "fundo_perdido" ? "Cancelamento / Fundo Perdido" : "Repactuado"}
+                          {op.tipo === "troca" ? "Troca Realizada" : op.tipo === "fundo_perdido" ? "Cancelamento / Fundo Perdido" : op.tipo === "exclusao" ? "Exclusão Auditada" : "Repactuado"}
                         </span>
                       </div>
 
